@@ -13,12 +13,8 @@ A U-Boot-free boot chain for the OrangePi R2S and OrangePi RV2 (SpacemiT K1, sol
 
 | Board | bt0 loads next stage from | Result |
 |---|---|---|
-| OrangePi R2S | eMMC hardware partition boot1 | Boots FreeBSD from eMMC, warm reboot verified (Oct 2026); cold boot pending |
+| OrangePi R2S | eMMC hardware partition boot1 | This repository's build (`fsbl.bin` in boot0, `next.img` in boot1, DEBUG EDK2) boots FreeBSD from eMMC on a warm reboot in about 85 s (Oct 2026). Cold boot pending |
 | OrangePi RV2 | not yet: microSD has no boot partitions; an SD or SPI NOR load path is needed | EDK2 and FIT build only |
-
-R2S details:
-- **What was tested:** this `fsbl.bin` was booted on hardware. The boot that reached FreeBSD used an earlier EDK2 configuration: the MUSE-Pi-Pro platform with `MemInfoDxe` removed and the same MMU-off fix applied in `CpuDxe`.
-- **Not yet on hardware:** the `OrangePiPkg` R2S platform here (eMMC-only MMC configuration, MMU-off as its own driver).
 
 Known gaps:
 - **EEPROM:** EDK2's EEPROM (TLV) reads over I2C2 time out, so MAC addresses do not come from the EEPROM yet.
