@@ -107,6 +107,9 @@ const BOOT_FIT_EMMC: bool = env_eq(option_env!("K1_BOOT"), "emmc");
 const BOOT_FIT_SD: bool = env_eq(option_env!("K1_BOOT"), "sd");
 const BOOT_EMMC_FIT: bool = BOOT_FIT_EMMC || BOOT_FIT_SD;
 const NEXT_LBA: u32 = env_u32(option_env!("K1_NEXT_LBA"));
+// K1_PCIE_PWR_GPIO: a GPIO that switches a PCIe slot's 3.3 V supply on (OrangePi
+// RV2: 116, the M.2 slot's vpcie3v3 regulator). 0 means none.
+const PCIE_PWR_GPIO: u32 = env_u32(option_env!("K1_PCIE_PWR_GPIO"));
 // Where the FIT is read to before its images are copied out.
 const FIT_STAGING_ADDR: usize = 0x1000_0000;
 
@@ -300,6 +303,12 @@ fn main() {
         // Without U-Boot SPL nothing else sets up the board EEPROM's I2C
         // bus, which the next stage (EDK2) reads early.
         eeprom_i2c_init();
+        if PCIE_PWR_GPIO != 0 {
+            // Switch the slot supply on early so the next stage finds the
+            // link; nothing else on this boot path drives the regulator.
+            gpio_output_high(PCIE_PWR_GPIO);
+            println!("[bt0] PCIe slot power on (GPIO {PCIE_PWR_GPIO})");
+        }
         // Load OpenSBI, the next stage and its DT from a FIT in eMMC boot1,
         // then start OpenSBI (fw_dynamic) with that next stage.
         let src = fit::Source {
@@ -373,6 +382,55 @@ fn eeprom_i2c_init() {
     write32(APBC_TWSI2_CLK_RST, (read32(APBC_TWSI2_CLK_RST) | 0b11) & !(1 << 2));
     write32(MFP_GPIO_84, I2C_PIN_CONFIG);
     write32(MFP_GPIO_85, I2C_PIN_CONFIG);
+}
+
+// K1 GPIO and pad mux (U-Boot drivers/gpio/spacemit_gpio.c and
+// drivers/pinctrl/spacemit/pinctrl-k1.c).
+const GPIO_BASE_ADDR: usize = 0xd401_9000;
+const PAD_MUX_BASE: usize = 0xd401_e000;
+
+fn gpio_bank_offset(pin: u32) -> usize {
+    match pin / 32 {
+        0 => 0x0,
+        1 => 0x4,
+        2 => 0x8,
+        _ => 0x100,
+    }
+}
+
+fn pad_mux_reg(pin: u32) -> usize {
+    let p = pin as usize;
+    let offset = 1 + match p {
+        0..=85 => p,
+        86..=92 => p + 36,
+        93..=97 => p + 23,
+        98 => 92,
+        99 => 91,
+        100 => 90,
+        101 => 89,
+        102 => 94,
+        103 => 93,
+        104..=110 => p + 5,
+        _ => p + 19,
+    };
+    PAD_MUX_BASE + (offset << 2)
+}
+
+fn gpio_mux(pin: u32) -> u32 {
+    match pin {
+        70..=73 | 93..=103 => 1,
+        104..=109 => 4,
+        _ => 0,
+    }
+}
+
+fn gpio_output_high(pin: u32) {
+    let bank = GPIO_BASE_ADDR + gpio_bank_offset(pin);
+    let bit = 1u32 << (pin % 32);
+    write32(bank + 0x18, bit); // GPSR: drive high
+    write32(bank + 0x54, bit); // GSDR: output
+    let pad = pad_mux_reg(pin);
+    write32(pad, (read32(pad) & !0x7) | gpio_mux(pin));
 }
 
 fn exec_payload(addr: usize) {

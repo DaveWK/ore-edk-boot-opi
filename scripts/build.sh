@@ -77,7 +77,7 @@ PY
 if [ -n "$BT0_BOOT" ]; then
   echo "== oreboot bt0 (K1_BOOT=$BT0_BOOT, K1_NEXT_LBA=$NEXT_LBA, K1_CS_NUM=$CS_NUM)"
   (cd "$ROOT/oreboot/src/mainboard/spacemit/k1x" &&
-   K1_CS_NUM=$CS_NUM K1_BOOT=$BT0_BOOT K1_NEXT_LBA=$NEXT_LBA cargo --locked xtask make --release)
+   K1_CS_NUM=$CS_NUM K1_BOOT=$BT0_BOOT K1_NEXT_LBA=$NEXT_LBA K1_PCIE_PWR_GPIO=${PCIE_PWR_GPIO:-0} cargo --locked xtask make --release)
   cp "$ROOT/oreboot/target/riscv64imac-unknown-none-elf/release/spacemit-k1x-bt0.bin" "$O/fsbl.bin"
 else
   echo "== oreboot bt0: no next-stage load path for $BOARD yet; fsbl.bin not built"
