@@ -386,10 +386,35 @@ const MFP_GPIO_85: usize = 0xd401_e158;
 // MUX_MODE4 | EDGE_NONE | PULL_UP | PAD_1V8_DS2
 const I2C_PIN_CONFIG: u32 = 4 | (1 << 6) | (6 << 13) | (1 << 12);
 
+// TWSI2 controller and its SCL timing registers.
+const TWSI2_BASE: usize = 0xd401_2000;
+const TWSI_ILCR: usize = 0x10;
+const TWSI_IWCR: usize = 0x14;
+// Functional clock mux (APBC_TWSIn_CLK_RST bits 6:4): only index 2 (pll1,
+// 61.44 MHz) has a running parent on these boards; at the power-on index 0
+// the registers respond but the state machine never moves.
+const TWSI_CLK_MUX_61M44: u32 = 2 << 4;
+// SCL timing for a 61.44 MHz functional clock, as FreeBSD's spacemit_i2c
+// derives it: standard-mode SLV 307 (100 kHz), fast-mode FLV 76 (400 kHz),
+// vendor high-speed fields kept; IWCR SDA hold of 312 ns (19 cycles).
+const TWSI_ILCR_61M44: u32 = 0x082c_9933;
+const TWSI_IWCR_61M44: u32 = 0x0000_1433;
+
 fn eeprom_i2c_init() {
-    write32(APBC_TWSI2_CLK_RST, (read32(APBC_TWSI2_CLK_RST) | 0b11) & !(1 << 2));
+    let v = read32(APBC_TWSI2_CLK_RST) & !(0x7 << 4);
+    write32(APBC_TWSI2_CLK_RST, (v | TWSI_CLK_MUX_61M44 | 0b11) & !(1 << 2));
     write32(MFP_GPIO_84, I2C_PIN_CONFIG);
     write32(MFP_GPIO_85, I2C_PIN_CONFIG);
+    // The next stage's I2C driver (SpacemiT's EDK2) resets the unit but never
+    // programs SCL timing; without it every transfer times out.
+    write32(TWSI2_BASE + TWSI_ILCR, TWSI_ILCR_61M44);
+    write32(TWSI2_BASE + TWSI_IWCR, TWSI_IWCR_61M44);
+    println!(
+        "[bt0] EEPROM I2C: clk {:08x} ILCR {:08x} IWCR {:08x}",
+        read32(APBC_TWSI2_CLK_RST),
+        read32(TWSI2_BASE + TWSI_ILCR),
+        read32(TWSI2_BASE + TWSI_IWCR)
+    );
 }
 
 // K1 GPIO and pad mux (U-Boot drivers/gpio/spacemit_gpio.c and

@@ -1,5 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0-only
-BOARDS := orangepi-r2s orangepi-rv2 orangepi-rv2-nor
+# Three images:
+#   make r2s       OrangePi R2S: bt0 in eMMC boot0, OpenSBI + EDK2 in eMMC boot1
+#   make rv2       OrangePi RV2: bt0 and OpenSBI + EDK2 on the microSD card,
+#                  UEFI variables in the SPI NOR
+#   make rv2-nor   OrangePi RV2: everything in the SPI NOR
+BOARDS := r2s rv2 rv2-nor
 TARGET ?= DEBUG
 
 .PHONY: all $(BOARDS) submodules clean

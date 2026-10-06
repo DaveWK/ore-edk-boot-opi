@@ -1,10 +1,11 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-2.0-only
 # Build the oreboot bt0 + OpenSBI + EDK2 boot chain for one OrangePi K1 board.
-#   scripts/build.sh <board> [DEBUG|RELEASE]
+#   scripts/build.sh <r2s|rv2|rv2-nor> [DEBUG|RELEASE]
 # Outputs in out/<board>/:
-#   fsbl.bin   BootROM image (oreboot bt0, signed by oreboot's packer) for the
-#              boot device's FSBL slot (eMMC boot0 + 512 on the R2S)
+#   bt0.bin    BootROM image: oreboot bt0, signed by oreboot's packer, for the
+#              boot device's first-stage slot(s) the BootROM header lists
+#              (R2S: eMMC boot0 + 512; RV2: microSD or SPI NOR FSBL copies)
 #   next.itb   FIT: OpenSBI fw_dynamic, EDK2 at 0x200000, board DT
 #   next.img   next.itb zero-padded to the board's next-stage area
 #              (R2S: eMMC boot1; RV2: microSD sectors from LBA 8192)
@@ -78,10 +79,10 @@ if [ -n "$BT0_BOOT" ]; then
   echo "== oreboot bt0 (K1_BOOT=$BT0_BOOT, K1_NEXT_LBA=$NEXT_LBA, K1_CS_NUM=$CS_NUM)"
   (cd "$ROOT/oreboot/src/mainboard/spacemit/k1x" &&
    K1_CS_NUM=$CS_NUM K1_BOOT=$BT0_BOOT K1_NEXT_LBA=$NEXT_LBA K1_PCIE_PWR_GPIO=${PCIE_PWR_GPIO:-0} cargo --locked xtask make --release)
-  cp "$ROOT/oreboot/target/riscv64imac-unknown-none-elf/release/spacemit-k1x-bt0.bin" "$O/fsbl.bin"
+  cp "$ROOT/oreboot/target/riscv64imac-unknown-none-elf/release/spacemit-k1x-bt0.bin" "$O/bt0.bin"
 else
-  echo "== oreboot bt0: no next-stage load path for $BOARD yet; fsbl.bin not built"
-  rm -f "$O/fsbl.bin"
+  echo "== oreboot bt0: no next-stage load path for $BOARD yet; bt0.bin not built"
+  rm -f "$O/bt0.bin"
 fi
 
 (cd "$O" && rm -f SHA256SUMS && sha256sum -- * > SHA256SUMS && cat SHA256SUMS)
