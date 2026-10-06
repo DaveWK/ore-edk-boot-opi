@@ -1,0 +1,42 @@
+/dts-v1/;
+/ {
+	description = "OpenSBI + EDK2 for @BOARD@";
+	#address-cells = <1>;
+	images {
+		uefi {
+			description = "EDK2";
+			type = "standalone";
+			os = "U-Boot";
+			arch = "riscv";
+			compression = "none";
+			load = <0x00200000>;
+			entry = <0x00200000>;
+			data = /incbin/("edk2.fd");
+		};
+		opensbi {
+			description = "OpenSBI fw_dynamic Firmware";
+			type = "firmware";
+			os = "opensbi";
+			arch = "riscv";
+			compression = "none";
+			load = <0x00000000>;
+			entry = <0x00000000>;
+			data = /incbin/("fw_dynamic.bin");
+		};
+		fdt-1 {
+			description = "@BOARD@";
+			type = "flat_dt";
+			compression = "none";
+			data = /incbin/("board.dtb");
+		};
+	};
+	configurations {
+		default = "conf-1";
+		conf-1 {
+			description = "@BOARD@";
+			firmware = "opensbi";
+			loadables = "uefi";
+			fdt = "fdt-1";
+		};
+	};
+};

@@ -1,0 +1,11 @@
+## @file
+#  OrangePi SpacemiT K1 boards (R2S, RV2) for the oreboot + EDK2 boot chain.
+#
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+##
+
+[Defines]
+  DEC_SPECIFICATION              = 0x0001001b
+  PACKAGE_NAME                   = OrangePiPkg
+  PACKAGE_GUID                   = 6C3F7D2E-91A4-4C1B-8E52-3D0B7A1F4E6A
+  PACKAGE_VERSION                = 0.1

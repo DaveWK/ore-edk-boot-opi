@@ -1,0 +1,31 @@
+## @file
+#  Return to bare (MMU off) translation at ExitBootServices().
+#
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+##
+
+[Defines]
+  INF_VERSION                    = 0x0001001b
+  BASE_NAME                      = BareSatpOnExitDxe
+  FILE_GUID                      = 4E2A9C51-7B3D-4F60-A8E1-6D5C2B9F0A37
+  MODULE_TYPE                    = DXE_DRIVER
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = BareSatpOnExitDxeEntry
+
+[Sources]
+  BareSatpOnExitDxe.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  UefiCpuPkg/UefiCpuPkg.dec
+  OrangePiPkg/OrangePiPkg.dec
+
+[LibraryClasses]
+  BaseLib
+  RiscVMmuLib
+  UefiBootServicesTableLib
+  UefiDriverEntryPoint
+  DebugLib
+
+[Depex]
+  TRUE
