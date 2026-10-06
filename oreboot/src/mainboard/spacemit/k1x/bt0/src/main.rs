@@ -110,6 +110,8 @@ const BOOT_FIT_SD: bool = env_eq(option_env!("K1_BOOT"), "sd");
 const BOOT_FIT_NOR: bool = env_eq(option_env!("K1_BOOT"), "nor");
 const BOOT_EMMC_FIT: bool = BOOT_FIT_EMMC || BOOT_FIT_SD || BOOT_FIT_NOR;
 const NEXT_LBA: u32 = env_u32(option_env!("K1_NEXT_LBA"));
+// K1_NEXT_PART: on an SD card, look the FIT up in the GPT by this partition
+// name (then by the reserved-firmware type), K1_NEXT_LBA being the fallback.
 // K1_PCIE_PWR_GPIO: a GPIO that switches a PCIe slot's 3.3 V supply on (OrangePi
 // RV2: 116, the M.2 slot's vpcie3v3 regulator). 0 means none.
 const PCIE_PWR_GPIO: u32 = env_u32(option_env!("K1_PCIE_PWR_GPIO"));
@@ -323,6 +325,7 @@ fn main() {
                 fit::Medium::Mmc(mmc::Kind::Emmc, mmc::Partition::Boot1)
             },
             lba: NEXT_LBA,
+            gpt_name: option_env!("K1_NEXT_PART"),
         };
         match fit::load(&src, FIT_STAGING_ADDR) {
             Ok(b) => {

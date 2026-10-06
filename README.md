@@ -14,7 +14,7 @@ A U-Boot-free boot chain for the OrangePi R2S and OrangePi RV2 (SpacemiT K1, sol
 | Board | bt0 loads next stage from | Result |
 |---|---|---|
 | OrangePi R2S (`r2s`) | eMMC hardware partition boot1 | This repository's build (`bt0.bin` in boot0, `next.img` in boot1, DEBUG EDK2) boots FreeBSD from eMMC on a warm reboot in about 85 s (Oct 2026). Cold boot pending |
-| OrangePi RV2 (`rv2`) | raw microSD sectors from LBA 8192 (4 MiB; fixed sector, not found by partition) | This repository's build boots FreeBSD from NVMe on a cold power-on (Oct 2026): bt0 switches the M.2 slot supply on (GPIO 116), EDK2 brings PCIe up (Gen2 x2) and boots the NVMe ESP. UEFI variables live in the SPI NOR (verified) |
+| OrangePi RV2 (`rv2`) | the microSD's GPT partition `boot1` (4 MiB; else FreeBSD's reserved firmware partition, else sector 8192) | This repository's build boots FreeBSD from NVMe on a cold power-on (Oct 2026): bt0 switches the M.2 slot supply on (GPIO 116), EDK2 brings PCIe up (Gen2 x2) and boots the NVMe ESP. UEFI variables live in the SPI NOR (verified) |
 | OrangePi RV2 (`rv2-nor`) | the 16 MiB SPI NOR, memory-mapped: bt0 at 0x20000/0x70000, FIT at 0xa0000, UEFI variables at 0x2a0000 | Boots FreeBSD from NVMe with the microSD card removed (Oct 2026); EDK2 keeps its variables in the NOR across boots |
 
 Known gaps:
@@ -78,7 +78,7 @@ bt0 then loads boot1 as usual.
 
 These steps write boot firmware on the microSD card. Keep a raw backup of the card's first 8 MiB first.
 
-1. Write `next.img` at sector 8192 (byte offset 4 MiB). bt0 reads raw sectors from there (`NEXT_LBA` in `boards/rv2/board.conf`); it does not look at the partition table. Keep those 4 MiB out of any filesystem: on our cards a GPT partition (named "uboot") covers exactly LBA 8192-16383 for that.
+1. Write `next.img` into a 4 MiB GPT partition named `boot1`. bt0 reads the card's GPT and loads the FIT from the partition with that name. If there is none, it uses a partition of the firmware type FreeBSD's riscv64 SD images reserve at 4 MiB (`hifive-bbl`, labelled "uboot" there). On a card with no GPT it falls back to sector 8192 (`NEXT_LBA`). To name FreeBSD's reserved partition: `gpart modify -i 2 -l boot1 mmcsd0`.
 2. Write `bt0.bin`, zero-padded to the existing slot, at both FSBL copies the card's BootROM header lists (128 KiB and 512 KiB on our cards). Leave the first 512 bytes as they are.
 
 ## Licences

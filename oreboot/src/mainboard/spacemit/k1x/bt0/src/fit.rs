@@ -68,6 +68,73 @@ pub enum Medium {
 pub struct Source {
     pub medium: Medium,
     pub lba: u32,
+    /// If set, look the FIT up in the GPT first: a partition with this name,
+    /// else one of the reserved-firmware type FreeBSD's SD images use
+    /// (hifive-bbl); `lba` is only the fallback when neither is found.
+    pub gpt_name: Option<&'static str>,
+}
+
+// GPT partition type hifive-bbl (2E54B353-1271-4842-806F-E436D6AF6985) as
+// stored on disk: FreeBSD's riscv64 SD images reserve a 4 MiB partition of
+// this type at 4 MiB for boot firmware.
+const GPT_TYPE_FIRMWARE: [u8; 16] = [
+    0x53, 0xb3, 0x54, 0x2e, 0x71, 0x12, 0x42, 0x48, 0x80, 0x6f, 0xe4, 0x36, 0xd6, 0xaf, 0x69, 0x85,
+];
+
+fn le32(addr: usize) -> u32 {
+    u32::from_le(unsafe { core::ptr::read_unaligned(addr as *const u32) })
+}
+
+fn le64(addr: usize) -> u64 {
+    u64::from_le(unsafe { core::ptr::read_unaligned(addr as *const u64) })
+}
+
+/// First sector of the FIT partition from the GPT: by name, else by type.
+fn gpt_find(r: &Reader, name: &str, buf: usize) -> Result<Option<u32>, Error> {
+    // Primary GPT header at LBA 1.
+    r.read(1, 1, buf)?;
+    let sig = unsafe { core::slice::from_raw_parts(buf as *const u8, 8) };
+    if sig != b"EFI PART" {
+        return Ok(None);
+    }
+    let entries_lba = le64(buf + 72) as u32;
+    let count = le32(buf + 80) as usize;
+    let size = le32(buf + 84) as usize;
+    if size < 128 || count == 0 || count > 256 {
+        return Ok(None);
+    }
+    r.read(entries_lba, (count * size).div_ceil(SECTOR), buf)?;
+    let mut by_type = None;
+    for i in 0..count {
+        let e = buf + i * size;
+        let ty = unsafe { core::slice::from_raw_parts(e as *const u8, 16) };
+        if ty.iter().all(|&b| b == 0) {
+            continue;
+        }
+        let first = le64(e + 32) as u32;
+        // Name: UTF-16LE, 36 code units, NUL-padded.
+        let mut matches = true;
+        let mut n = 0;
+        for (k, c) in name.bytes().enumerate() {
+            if unsafe { core::ptr::read_unaligned((e + 56 + 2 * k) as *const u16) } != c as u16 {
+                matches = false;
+                break;
+            }
+            n = k + 1;
+        }
+        if matches && n < 36 && unsafe { core::ptr::read_unaligned((e + 56 + 2 * n) as *const u16) } == 0 {
+            println!("[bt0] FIT in GPT partition {} \"{name}\" at sector {first}", i + 1);
+            return Ok(Some(first));
+        }
+        if by_type.is_none() && ty == GPT_TYPE_FIRMWARE {
+            by_type = Some((i + 1, first));
+        }
+    }
+    if let Some((index, first)) = by_type {
+        println!("[bt0] FIT in GPT partition {index} (firmware type) at sector {first}");
+        return Ok(Some(first));
+    }
+    Ok(None)
 }
 
 /// Reads sectors from an MMC card, or copies them out of the NOR window.
@@ -105,15 +172,25 @@ pub fn load(src: &Source, staging: usize) -> Result<Boot, Error> {
         }
         Medium::Nor => Reader::Nor,
     };
+    let lba = match src.gpt_name {
+        Some(name) => match gpt_find(&mmc, name, staging)? {
+            Some(first) => first,
+            None => {
+                println!("[bt0] no GPT firmware partition; FIT at sector {}", src.lba);
+                src.lba
+            }
+        },
+        None => src.lba,
+    };
     // FIT header first, to learn its size and where the image data ends.
-    mmc.read(src.lba, 1, staging)?;
+    mmc.read(lba, 1, staging)?;
     if be32(staging) != 0xd00d_feed {
         let _ = mmc.select(Partition::User);
         return Err(Error::NotFit);
     }
     let header = be32(staging + 4) as usize;
     let data_base = (header + 3) & !3;
-    mmc.read(src.lba, header.div_ceil(SECTOR), staging)?;
+    mmc.read(lba, header.div_ceil(SECTOR), staging)?;
     let fit = Fdt::new(unsafe { core::slice::from_raw_parts(staging as *const u8, header) })
         .map_err(|_| Error::NotFit)?;
     let conf = fit
@@ -138,8 +215,8 @@ pub fn load(src: &Source, staging: usize) -> Result<Boot, Error> {
         let _ = mmc.select(Partition::User);
         return Err(Error::TooBig(end));
     }
-    println!("[bt0] reading FIT at sector {} ({end} bytes)", src.lba);
-    mmc.read(src.lba, end.div_ceil(SECTOR), staging)?;
+    println!("[bt0] reading FIT at sector {lba} ({end} bytes)");
+    mmc.read(lba, end.div_ceil(SECTOR), staging)?;
     mmc.select(Partition::User)?;
 
     let place = |i: &Image, dest: usize| {
