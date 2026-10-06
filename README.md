@@ -51,7 +51,7 @@ Requirements:
 `out/<image>/` then holds:
 - `bt0.bin`: the BootROM image (oreboot bt0, signed by oreboot's packer).
 - `next.itb`: a FIT with OpenSBI `fw_dynamic` at 0x0, EDK2 at 0x200000 and the board DT with its memory nodes.
-- `next.img`: `next.itb` zero-padded to the next-stage area (R2S: the 4 MiB eMMC boot1 partition; RV2: 4 MiB of microSD from LBA 8192).
+- `next.img`: `next.itb` zero-padded to the next-stage area (R2S: the 4 MiB eMMC boot1 partition; RV2: the 4 MiB microSD GPT partition `boot1`).
 - `SHA256SUMS`.
 
 ## Installing on the R2S
