@@ -41,6 +41,7 @@ const CAPABILITIES: usize = 0x40;
 
 // SpacemiT K1 vendor registers (see U-Boot drivers/mmc/spacemit_sdhci.c)
 const OP_EXT: usize = 0x108;
+const LEGACY_CTRL: usize = 0x10c;
 const MMC_CTRL: usize = 0x114;
 const TX_CFG: usize = 0x11c;
 const PHY_CTRL: usize = 0x160;
@@ -55,7 +56,11 @@ const INT_BUF_WRITE_READY: u32 = 1 << 4;
 const INT_BUF_READ_READY: u32 = 1 << 5;
 const INT_ERROR: u32 = 1 << 15;
 
+const SDMA_ADDR: usize = 0x00;
+const INT_DMA: u32 = 1 << 3;
+
 // Transfer mode
+const TM_DMA: u16 = 1 << 0;
 const TM_BLOCK_COUNT: u16 = 1 << 1;
 const TM_AUTO_CMD12: u16 = 1 << 2;
 const TM_READ: u16 = 1 << 4;
@@ -64,6 +69,7 @@ const TM_MULTI: u16 = 1 << 5;
 // Host control 1: data bus width
 const HC_4BIT: u8 = 1 << 1;
 const HC_8BIT: u8 = 1 << 5;
+const HC_HIGH_SPEED: u8 = 1 << 2;
 
 const CLOCK_INT_EN: u16 = 1 << 0;
 const CLOCK_INT_STABLE: u16 = 1 << 1;
@@ -202,7 +208,9 @@ impl Mmc {
         self.w32(INT_STATUS, 0xffff_ffff);
         self.w32(ARGUMENT, arg);
         if flags & DATA_PRESENT != 0 {
-            self.w16(BLOCK_SIZE, SECTOR as u16);
+            // SDMA pauses at 512 KiB boundaries (BLOCK_SIZE bits 14:12 = 7).
+            let boundary = if mode & TM_DMA != 0 { 7 << 12 } else { 0 };
+            self.w16(BLOCK_SIZE, SECTOR as u16 | boundary);
             self.w16(BLOCK_COUNT, blocks as u16);
             self.w16(TRANSFER_MODE, mode);
         } else {
@@ -502,6 +510,45 @@ impl Mmc {
         Ok(())
     }
 
+    /// Write like write(), but let the controller fetch the data from DRAM
+    /// (SDMA) instead of pushing it through the data port.
+    pub fn write_dma(&self, lba: u32, count: usize, src: usize) -> Result<(), Error> {
+        // SDMA, not ADMA (host control bits 4:3 = 0).
+        self.w8(HOST_CONTROL, self.r8(HOST_CONTROL) & !(3 << 3));
+        let mut done = 0;
+        while done < count {
+            let n = (count - done).min(2048);
+            let sector = lba + done as u32;
+            let arg = if self.block_addressing { sector } else { sector * SECTOR as u32 };
+            let addr = src + done * SECTOR;
+            crate::cache::flush(addr, n * SECTOR);
+            self.w32(SDMA_ADDR, addr as u32);
+            let mode = TM_DMA | TM_BLOCK_COUNT | if n > 1 { TM_AUTO_CMD12 | TM_MULTI } else { 0 };
+            let index = if n > 1 { 25 } else { 24 };
+            self.command_data(index, arg, R1 | DATA_PRESENT, mode, n)?;
+            loop {
+                let r = wait("dma write", || {
+                    self.r32(INT_STATUS) & (INT_XFER_COMPLETE | INT_DMA | INT_ERROR) != 0
+                });
+                let status = self.r32(INT_STATUS);
+                if r.is_err() || status & INT_ERROR != 0 {
+                    self.abort();
+                    return Err(Error::Command(index, status));
+                }
+                if status & INT_XFER_COMPLETE != 0 {
+                    self.w32(INT_STATUS, INT_XFER_COMPLETE | INT_DMA);
+                    break;
+                }
+                // Boundary reached: writing the address register resumes.
+                self.w32(INT_STATUS, INT_DMA);
+                self.w32(SDMA_ADDR, self.r32(SDMA_ADDR));
+            }
+            self.wait_ready()?;
+            done += n;
+        }
+        Ok(())
+    }
+
     /// Set the data bus width (8, 4 or 1 bits) on the card and the host.
     pub fn set_width(&mut self, width: u8) -> Result<(), Error> {
         match self.kind {
@@ -527,9 +574,96 @@ impl Mmc {
         Ok(())
     }
 
-    /// Change the card clock.
-    pub fn set_khz(&self, khz: u32) -> Result<(), Error> {
-        self.set_clock(khz)
+    /// The controller's source clock in kHz, from its APMU mux and divider
+    /// (Linux ccu-k1.c: mux bits 7:5, divider bits 10:8 + 1).
+    pub fn source_khz(&self) -> u32 {
+        if self.base_clock_mhz() != 0 {
+            return self.base_clock_mhz() * 1000;
+        }
+        // pll1_d6, pll1_d4, pll2_d8, pll1_d3 (SDH2) or pll2_d5 (SDH0),
+        // pll1_d11, pll1_d13, pll1_d23
+        let (reg, third) = match self.kind {
+            Kind::Emmc => (read32(APMU_SDH2_CLK_RES_CTRL), 819_200),
+            Kind::Sd => (read32(APMU_SDH0_CLK_RES_CTRL), 600_000),
+        };
+        let parents = [409_600, 614_400, 375_000, third, 223_400, 189_000, 106_800];
+        let mux = ((reg >> 5) & 7) as usize;
+        let div = ((reg >> 8) & 7) + 1;
+        parents.get(mux).copied().unwrap_or(409_600) / div
+    }
+
+    /// Set the card clock to at most `khz` from the real source clock, and
+    /// eMMC high-speed timing above 26 MHz. Returns the clock set.
+    pub fn set_khz(&self, khz: u32) -> Result<u32, Error> {
+        let hs = khz > 26_000;
+        if self.kind == Kind::Emmc {
+            self.switch(3, 185, hs as u32)?;
+        }
+        let hc = self.r8(HOST_CONTROL) & !HC_HIGH_SPEED;
+        self.w8(HOST_CONTROL, hc | if hs { HC_HIGH_SPEED } else { 0 });
+        let src = self.source_khz();
+        let mut n = src.div_ceil(2 * khz).max(1);
+        if n > 0x3ff {
+            n = 0x3ff;
+        }
+        self.w16(CLOCK_CONTROL, 0);
+        let div = (((n & 0xff) << 8) | ((n >> 8) & 0x3) << 6) as u16;
+        self.w16(CLOCK_CONTROL, div | CLOCK_INT_EN);
+        wait("internal clock", || self.r16(CLOCK_CONTROL) & CLOCK_INT_STABLE != 0)?;
+        self.w16(CLOCK_CONTROL, div | CLOCK_INT_EN | CLOCK_CARD_EN);
+        spin(100_000);
+        Ok(src / (2 * n))
+    }
+
+    /// Pad and PHY set-up for writing, as FreeBSD's sdhci_fdt_spacemit does
+    /// for this slot: PHY in functional mode, pad drive strength 4 and RX
+    /// bias, GEN_PAD_CLK_ON and TX_INT_CLK_SEL. In download mode the BootROM
+    /// has not touched the card's pads.
+    pub fn tune_for_writes(&self) {
+        println!(
+            "[mmc] before: APMU {:08x} PHY_CTRL {:08x} PAD {:08x} LEGACY {:08x} TX {:08x} OP_EXT {:08x}",
+            read32(match self.kind {
+                Kind::Emmc => APMU_SDH2_CLK_RES_CTRL,
+                Kind::Sd => APMU_SDH0_CLK_RES_CTRL,
+            }),
+            self.r32(PHY_CTRL),
+            self.r32(PHY_PADCFG),
+            self.r32(LEGACY_CTRL),
+            self.r32(TX_CFG),
+            self.r32(OP_EXT)
+        );
+        if self.kind == Kind::Emmc {
+            self.w32(PHY_CTRL, self.r32(PHY_CTRL) | 0x3);
+            self.w32(PHY_PADCFG, (self.r32(PHY_PADCFG) & !0x7) | 4 | (1 << 5));
+        }
+        self.w32(LEGACY_CTRL, self.r32(LEGACY_CTRL) | (1 << 6));
+        self.set_tx_hold(true);
+        println!("[mmc] source clock {} kHz", self.source_khz());
+    }
+
+    /// Whether TRIM leaves zeros: TRIM supported and erased memory reads 0.
+    pub fn trim_zeroes(&self) -> bool {
+        match self.ext_csd() {
+            // SEC_FEATURE_SUPPORT bit 4 (SEC_GB_CL_EN: TRIM), ERASED_MEM_CONT
+            Ok(ext) => self.kind == Kind::Emmc && ext[231] & (1 << 4) != 0 && ext[181] == 0,
+            Err(_) => false,
+        }
+    }
+
+    /// TRIM `count` sectors from `lba` (CMD35, CMD36, CMD38 with arg 1).
+    pub fn trim(&self, lba: u32, count: usize) -> Result<(), Error> {
+        self.command(35, lba, R1)?;
+        self.command(36, lba + count as u32 - 1, R1)?;
+        let r = self.command(38, 1, R1B);
+        let ready = self.wait_ready();
+        r?;
+        ready
+    }
+
+    /// Read one sector (for checks).
+    pub fn read_sector(&self, lba: u32, dest: usize) -> Result<(), Error> {
+        let arg = if self.block_addressing { lba } else { lba * SECTOR as u32 };
+        self.read_block(17, arg, dest)
     }
 
     /// TX_INT_CLK_SEL on or off (write data hold time).

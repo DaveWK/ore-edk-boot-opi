@@ -98,7 +98,7 @@ Then, for example on the R2S:
 
 `fastboot getvar partition-size:<target>` reports the eMMC partition sizes. Building bt0 with `K1_FASTBOOT=no` leaves the flasher out.
 
-If the card rejects a write, the flasher retries it with a narrower bus, then without the TX hold-time setting, then at a lower clock, and logs each step on the serial console. On the R2S, 8-bit reads work but 8-bit and 4-bit writes fail with a data CRC error, so writes run on the 1-bit bus. Downloads run at about 23 MB/s, but writing a 3.3 GB FreeBSD image took 22 minutes (Oct 2026).
+Writes go through SDMA straight from the download buffer, on the widest bus and fastest clock a test read accepts. On the R2S that is 8 bits at 51.2 MHz, about 30 MB/s (October 2026). On a write error, the flasher steps down to narrower buses, PIO and lower clocks, logging each step on the serial console. PIO writes on wide buses fail with data CRC errors on the R2S. Zero-filled sparse chunks are TRIMmed instead of written when the eMMC reports that trimmed blocks read as zero; the first and last sector are read back to check.
 
 ## Installing on the RV2
 

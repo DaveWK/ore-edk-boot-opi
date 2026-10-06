@@ -90,25 +90,32 @@ fn le32(a: usize) -> u32 {
     unsafe { core::ptr::read_unaligned(a as *const u32) }
 }
 
-/// The open card: initialised once per medium, with the bus widened.
+/// The open card: initialised once per medium, with the bus widened and
+/// the clock raised as far as a test read allows.
 struct Disk {
     kind: Kind,
     mmc: Mmc,
     width: u8,
+    khz: u32,
+    /// TRIM leaves zeros, so zero fills can be trimmed instead of written.
+    trim: bool,
     /// Index into FALLBACK once a write has failed.
     fallback: usize,
+    /// Writes go through SDMA rather than the data port.
+    dma: bool,
 }
 
 /// Bus settings tried in turn when a write fails: width, TX hold time,
-/// clock in kHz.
-const FALLBACK: [(u8, bool, u32); 7] = [
-    (4, true, 25_000),
-    (1, true, 25_000),
-    (1, false, 25_000),
-    (4, false, 25_000),
-    (8, false, 25_000),
-    (1, true, 5_000),
-    (1, false, 5_000),
+/// clock in kHz (above 26 MHz with eMMC high-speed timing), SDMA.
+const FALLBACK: [(u8, bool, u32, bool); 8] = [
+    (8, true, 25_000, true),
+    (4, true, 25_000, true),
+    (8, true, 25_000, false),
+    (4, true, 25_000, false),
+    (1, true, 25_000, true),
+    (1, true, 25_000, false),
+    (1, false, 25_000, false),
+    (1, true, 5_000, false),
 ];
 
 impl Disk {
@@ -116,9 +123,24 @@ impl Disk {
         if slot.as_ref().map(|d| d.kind) != Some(kind) {
             *slot = None;
             let mut mmc = Mmc::init(kind).map_err(|_| "card did not initialise")?;
+            mmc.tune_for_writes();
             let width = mmc.widen();
-            println!("[fastboot] {}-bit bus", width);
-            *slot = Some(Disk { kind, mmc, width, fallback: 0 });
+            // High speed where the card takes it, checked with a read.
+            let mut khz = 0;
+            if kind == Kind::Emmc {
+                if let Ok(k) = mmc.set_khz(52_000) {
+                    if mmc.ext_csd().is_ok() {
+                        khz = k;
+                    }
+                }
+            }
+            if khz == 0 {
+                khz = mmc.set_khz(25_000).map_err(|_| "cannot set the card clock")?;
+            }
+            let trim = mmc.trim_zeroes();
+            println!("[fastboot] {width}-bit bus at {khz} kHz, trim for zeros: {trim}");
+            // PIO writes fail on wide eMMC buses (R2S), so start with SDMA.
+            *slot = Some(Disk { kind, mmc, width, khz, trim, fallback: 0, dma: true });
         }
         Ok(slot.as_mut().unwrap())
     }
@@ -126,29 +148,87 @@ impl Disk {
     /// Write, stepping through FALLBACK when the card rejects the data.
     fn write(&mut self, lba: u32, count: usize, src: usize) -> Result<(), &'static str> {
         loop {
-            match self.mmc.write(lba, count, src) {
+            let r = if self.dma {
+                self.mmc.write_dma(lba, count, src)
+            } else {
+                self.mmc.write(lba, count, src)
+            };
+            match r {
                 Ok(()) => return Ok(()),
                 Err(e) => {
-                    println!("[fastboot] write error at {lba} ({}-bit): {e:?}", self.width);
+                    println!(
+                        "[fastboot] write error at {lba} ({}-bit, {} kHz, {}): {e:?}",
+                        self.width,
+                        self.khz,
+                        if self.dma { "SDMA" } else { "PIO" }
+                    );
                     loop {
                         if self.fallback == FALLBACK.len() {
                             return Err("write failed (see the serial console)");
                         }
-                        let (width, hold, khz) = FALLBACK[self.fallback];
+                        let (width, hold, khz, dma) = FALLBACK[self.fallback];
                         self.fallback += 1;
                         if width > 4 && self.kind == Kind::Sd {
                             continue;
                         }
                         self.mmc.set_tx_hold(hold);
-                        if self.mmc.set_width(width).is_ok() && self.mmc.set_khz(khz).is_ok() {
+                        if self.mmc.set_width(width).is_err() {
+                            continue;
+                        }
+                        if let Ok(k) = self.mmc.set_khz(khz) {
                             self.width = width;
-                            println!("[fastboot] retrying: {width}-bit bus, TX hold {hold}, {khz} kHz");
+                            self.khz = k;
+                            self.dma = dma;
+                            println!(
+                                "[fastboot] retrying: {width}-bit bus, TX hold {hold}, {k} kHz, {}",
+                                if dma { "SDMA" } else { "PIO" }
+                            );
                             break;
                         }
                     }
                 }
             }
         }
+    }
+
+    /// Zero `count` sectors: TRIM them when that leaves zeros (checked on
+    /// the first and last sector), else write zeros from `zeros`.
+    fn zero(&mut self, lba: u32, count: usize, zeros: usize, zeros_len: usize) -> Result<(), &'static str> {
+        if self.trim {
+            let mut ok = true;
+            let mut done = 0;
+            while done < count {
+                let n = (count - done).min(1 << 17);
+                if self.mmc.trim(lba + done as u32, n).is_err() {
+                    ok = false;
+                    break;
+                }
+                done += n;
+            }
+            if ok {
+                let mut probe = [0xffu8; SECTOR];
+                for s in [lba, lba + count as u32 - 1] {
+                    let p = probe.as_mut_ptr() as usize;
+                    if self.mmc.read_sector(s, p).is_err() || probe.iter().any(|b| *b != 0) {
+                        ok = false;
+                    }
+                    probe = [0xff; SECTOR];
+                }
+            }
+            if ok {
+                return Ok(());
+            }
+            println!("[fastboot] TRIM did not leave zeros; writing them");
+            self.trim = false;
+        }
+        let per = zeros_len / SECTOR;
+        let mut done = 0;
+        while done < count {
+            let n = (count - done).min(per);
+            self.write(lba + done as u32, n, zeros)?;
+            done += n;
+        }
+        Ok(())
     }
 }
 
@@ -221,13 +301,16 @@ fn write_sparse(usb: &mut Usb, d: &mut Disk, cap: Option<u64>, len: usize) -> Re
                     fill(value);
                     pattern = Some(value);
                 }
-                let mut left = bytes;
-                let mut lba = at * spb;
-                while left > 0 {
-                    let n = left.min(FILL_LEN);
-                    d.write(lba as u32, n / SECTOR, FILL_BUF)?;
-                    lba += (n / SECTOR) as u64;
-                    left -= n;
+                let sectors = bytes / SECTOR;
+                if value == 0 {
+                    d.zero((at * spb) as u32, sectors, FILL_BUF, FILL_LEN)?;
+                } else {
+                    let mut done = 0;
+                    while done < sectors {
+                        let n = (sectors - done).min(FILL_LEN / SECTOR);
+                        d.write((at * spb) as u32 + done as u32, n, FILL_BUF)?;
+                        done += n;
+                    }
                 }
             }
             CHUNK_DONT_CARE | CHUNK_CRC32 => {}
