@@ -15,8 +15,28 @@ BOARD=${1:?board}
 TARGET=${2:-DEBUG}
 CONF=$ROOT/boards/$BOARD/board.conf
 [ -f "$CONF" ] || { echo "unknown board $BOARD" >&2; exit 2; }
+UEFI_VARS_ENV=${UEFI_VARS:-}
 # shellcheck source=/dev/null
 . "$CONF"
+# UEFI variable store: ram (nothing written) or nor (SPI NOR 0x2a0000-0x360000).
+# The board sets the default; UEFI_VARS in the environment overrides it.
+UEFI_VARS=${UEFI_VARS_ENV:-${UEFI_VARS:-ram}}
+case "$UEFI_VARS" in
+  ram) EMU_VARS=TRUE ;;
+  nor)
+    EMU_VARS=FALSE
+    [ "${NOR_VARS_OK:-no}" = yes ] || { echo "$BOARD has no SPI NOR variable store" >&2; exit 2; }
+    if [ "$BT0_BOOT" != nor ]; then
+      cat >&2 <<'WARN'
+WARNING: UEFI_VARS=nor. This firmware keeps UEFI variables in the SPI NOR at
+0x2a0000-0x360000 and ERASES and formats that range on first boot when it holds
+no variable store. On a board whose NOR has other firmware there (for example
+the vendor's), that firmware is destroyed. Back up the NOR first.
+WARN
+    fi
+    ;;
+  *) echo "UEFI_VARS must be ram or nor, not $UEFI_VARS" >&2; exit 2 ;;
+esac
 CROSS=${CROSS_COMPILE:-riscv64-linux-gnu-}
 JOBS=${JOBS:-$(nproc)}
 B=$ROOT/build/$BOARD
@@ -43,7 +63,7 @@ for range in $MEMORY; do
   fdtput -t x "$B/board.dtb" "$node" reg $(printf '%x %x %x %x' $((base >> 32)) $((base & 0xffffffff)) $((size >> 32)) $((size & 0xffffffff)))
 done
 
-echo "== EDK2 ($EDK2_PLATFORM, $TARGET)"
+echo "== EDK2 ($EDK2_PLATFORM, $TARGET, UEFI variables in $UEFI_VARS)"
 (
   export WORKSPACE=$B/edk2-ws PACKAGES_PATH=$ROOT/edk2:$ROOT/edk2-platforms:$ROOT/edk2-opi
   export GCC5_RISCV64_PREFIX=$CROSS PYTHON_COMMAND=python3
@@ -59,7 +79,8 @@ echo "== EDK2 ($EDK2_PLATFORM, $TARGET)"
   . ./edksetup.sh >/dev/null
   set -e
   cd "$WORKSPACE"
-  build -q -a RISCV64 -t GCC5 -b "$TARGET" -p "$EDK2_PLATFORM" -n "$JOBS"
+  build -q -a RISCV64 -t GCC5 -b "$TARGET" -p "$EDK2_PLATFORM" -n "$JOBS" \
+    -D EMU_VARIABLE_NV_MODE_ENABLE="$EMU_VARS"
   cp "Build/$(basename "$EDK2_PLATFORM" .dsc | sed 's/^/OrangePi-/')/${TARGET}_GCC5/FV/$EDK2_FD" "$B/edk2.fd"
 )
 

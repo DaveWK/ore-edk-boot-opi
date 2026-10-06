@@ -199,7 +199,9 @@ INF Silicon/Spacemit/K1/Drivers/UsbHcdInitDxe/UsbHcd.inf
 # Spinor flash support
 #
 INF Silicon/Spacemit/K1/Drivers/QspiDxe/QspiDxe.inf
+!if $(EMU_VARIABLE_NV_MODE_ENABLE) == FALSE
 INF Silicon/Spacemit/Drivers/Spi/SpiNorFlashDxe/SpiNorFlashDxe.inf
+!endif
 
 #
 # GOP support
@@ -209,7 +211,9 @@ INF Silicon/Spacemit/K1/Drivers/HdmiGraphicsOutputDxe/HdmiGraphicsOutputDxe.inf
 #
 # Firmware Volume Block service
 #
+!if $(EMU_VARIABLE_NV_MODE_ENABLE) == FALSE
 INF Silicon/Spacemit/Drivers/FlashFvbDxe/FlashFvbDxe.inf
+!endif
 
 # I2C Master Driver
 INF MdeModulePkg/Bus/I2c/I2cDxe/I2cDxe.inf

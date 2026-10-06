@@ -2,7 +2,8 @@
 # Three images:
 #   make r2s       OrangePi R2S: bt0 in eMMC boot0, OpenSBI + EDK2 in eMMC boot1
 #   make rv2       OrangePi RV2: bt0 and OpenSBI + EDK2 on the microSD card,
-#                  UEFI variables in the SPI NOR
+#                  UEFI variables in RAM (UEFI_VARS=nor: in the SPI NOR, with
+#                  a warning: that erases NOR 0x2a0000-0x360000 on first boot)
 #   make rv2-nor   OrangePi RV2: everything in the SPI NOR
 BOARDS := r2s rv2 rv2-nor
 TARGET ?= DEBUG

@@ -20,9 +20,13 @@
   FLASH_DEFINITION               = OrangePiPkg/K1/RV2/RV2.fdf
 
   DEFINE DEBUG_ON_SERIAL_PORT    = TRUE
-  # UEFI variables live in the SPI NOR (0x2A0000-0x360000, SpacemiT's layout),
-  # whether the firmware was loaded from the NOR or from the microSD card.
-  DEFINE EMU_VARIABLE_NV_MODE_ENABLE = FALSE
+  # UEFI variables: in RAM by default (TRUE), so nothing writes the SPI NOR.
+  # FALSE keeps them in the SPI NOR at 0x2A0000-0x360000 (SpacemiT's layout)
+  # and builds the NOR drivers, which erase and format that range when it
+  # holds no variable store. scripts/build.sh sets it from UEFI_VARS.
+!ifndef EMU_VARIABLE_NV_MODE_ENABLE
+  DEFINE EMU_VARIABLE_NV_MODE_ENABLE = TRUE
+!endif
 
 [SkuIds]
   0|DEFAULT
@@ -362,7 +366,9 @@
   # Spinor flash support
   #
   Silicon/Spacemit/K1/Drivers/QspiDxe/QspiDxe.inf
+!if $(EMU_VARIABLE_NV_MODE_ENABLE) == FALSE
   Silicon/Spacemit/Drivers/Spi/SpiNorFlashDxe/SpiNorFlashDxe.inf
+!endif
 
   #
   # GOP support
@@ -375,7 +381,9 @@
   #
   # Firmware Volume Block service
   #
+!if $(EMU_VARIABLE_NV_MODE_ENABLE) == FALSE
   Silicon/Spacemit/Drivers/FlashFvbDxe/FlashFvbDxe.inf
+!endif
 
   #
   # I2C support

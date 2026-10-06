@@ -14,11 +14,11 @@ A U-Boot-free boot chain for the OrangePi R2S and OrangePi RV2 (SpacemiT K1, sol
 | Board | bt0 loads next stage from | Result |
 |---|---|---|
 | OrangePi R2S (`r2s`) | eMMC hardware partition boot1 | This repository's build (`bt0.bin` in boot0, `next.img` in boot1, DEBUG EDK2) boots FreeBSD from eMMC on a warm reboot in about 85 s (Oct 2026). Cold boot pending |
-| OrangePi RV2 (`rv2`) | the microSD's GPT partition `boot1` (4 MiB; else FreeBSD's reserved firmware partition, else sector 8192) | This repository's build boots FreeBSD from NVMe on a cold power-on (Oct 2026): bt0 switches the M.2 slot supply on (GPIO 116), EDK2 brings PCIe up (Gen2 x2) and boots the NVMe ESP. UEFI variables live in the SPI NOR (verified) |
+| OrangePi RV2 (`rv2`) | the microSD's GPT partition `boot1` (4 MiB; else FreeBSD's reserved firmware partition, else sector 8192) | This repository's build boots FreeBSD from NVMe on a cold power-on (Oct 2026): bt0 switches the M.2 slot supply on (GPIO 116), EDK2 brings PCIe up (Gen2 x2) and boots the NVMe ESP. UEFI variables are kept in RAM by default; with `UEFI_VARS=nor` they live in the SPI NOR (verified) |
 | OrangePi RV2 (`rv2-nor`) | the 16 MiB SPI NOR, memory-mapped: bt0 at 0x20000/0x70000, FIT at 0xa0000, UEFI variables at 0x2a0000 | Boots FreeBSD from NVMe with the microSD card removed (Oct 2026); EDK2 keeps its variables in the NOR across boots |
 
 Known gaps:
-- **UEFI variables:** RAM only on the R2S (no NOR); in the SPI NOR on the RV2.
+- **UEFI variables:** in RAM on the R2S (it has no NOR) and, by default, on the RV2 microSD build, so booting a card never writes the SPI NOR. `make rv2 UEFI_VARS=nor` keeps them in the SPI NOR at 0x2a0000-0x360000 instead, and the build prints a warning: EDK2 erases and formats that range on first boot when it holds no variable store, which destroys any other firmware there. `rv2-nor` always keeps them in the NOR.
 - **Bootinfo header:** none is generated. Installs keep the boot device's existing one.
 - **Secure boot:** the BootROM image is signed with oreboot's packer keys. This works on boards without secure-boot fuses.
 
