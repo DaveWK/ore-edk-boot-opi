@@ -14,7 +14,7 @@ A U-Boot-free boot chain for the OrangePi R2S and OrangePi RV2 (SpacemiT K1, sol
 | Board | bt0 loads next stage from | Result |
 |---|---|---|
 | OrangePi R2S | eMMC hardware partition boot1 | This repository's build (`fsbl.bin` in boot0, `next.img` in boot1, DEBUG EDK2) boots FreeBSD from eMMC on a warm reboot in about 85 s (Oct 2026). Cold boot pending |
-| OrangePi RV2 | not yet: microSD has no boot partitions; an SD or SPI NOR load path is needed | EDK2 and FIT build only |
+| OrangePi RV2 | raw microSD sectors from LBA 8192 (the 4 MiB GPT partition "uboot") | Builds (`fsbl.bin`, `next.img`); not yet run on hardware |
 
 Known gaps:
 - **EEPROM:** EDK2's EEPROM (TLV) reads over I2C2 time out, so MAC addresses do not come from the EEPROM yet.
@@ -51,7 +51,7 @@ Requirements:
 `out/<board>/` then holds:
 - `fsbl.bin`: the BootROM image (oreboot bt0, signed by oreboot's packer).
 - `next.itb`: a FIT with OpenSBI `fw_dynamic` at 0x0, EDK2 at 0x200000 and the board DT with its memory nodes.
-- `next.img`: `next.itb` zero-padded to the next-stage area (R2S: the 4 MiB eMMC boot1 partition).
+- `next.img`: `next.itb` zero-padded to the next-stage area (R2S: the 4 MiB eMMC boot1 partition; RV2: 4 MiB of microSD from LBA 8192).
 - `SHA256SUMS`.
 
 ## Installing on the R2S
@@ -67,6 +67,13 @@ To try an image without writing boot0, hold the download button and run:
     fastboot continue
 
 bt0 then loads boot1 as usual.
+
+## Installing on the RV2 (untested)
+
+These steps write boot firmware on the microSD card. Keep a raw backup of the card's first 8 MiB first.
+
+1. Write `next.img` to LBA 8192 (GPT partition 2, "uboot").
+2. Write `fsbl.bin`, zero-padded to the existing slot, at both FSBL copies the card's BootROM header lists (128 KiB and 512 KiB on our cards). Leave the first 512 bytes as they are.
 
 ## Licences
 

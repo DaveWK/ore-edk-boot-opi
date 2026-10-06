@@ -18,8 +18,8 @@ use embedded_hal_nb::serial::Write;
 use riscv::register::{marchid, mhartid, mimpid, mip, mvendorid};
 
 mod dram;
-mod emmc;
 mod fit;
+mod mmc;
 mod uart;
 
 use uart::K1XSerial;
@@ -64,14 +64,49 @@ const MEM_TEST_FULL: bool = false;
 
 const DUMP_FLASH: bool = false;
 
-// K1_BOOT=emmc: load a FIT (OpenSBI, next stage, DT) from eMMC boot1.
-const BOOT_EMMC_FIT: bool = match option_env!("K1_BOOT") {
-    Some(v) => {
-        let b = v.as_bytes();
-        b.len() == 4 && b[0] == b'e' && b[1] == b'm' && b[2] == b'm' && b[3] == b'c'
+// K1_BOOT=emmc|sd: load a FIT (OpenSBI, next stage, DT) from the eMMC boot1
+// partition (OrangePi R2S) or from raw SD card sectors starting at
+// K1_NEXT_LBA (OrangePi RV2: 8192, its 4 MiB "uboot" GPT partition).
+const fn env_eq(v: Option<&str>, want: &str) -> bool {
+    match v {
+        None => false,
+        Some(v) => {
+            let (a, b) = (v.as_bytes(), want.as_bytes());
+            if a.len() != b.len() {
+                return false;
+            }
+            let mut i = 0;
+            while i < a.len() {
+                if a[i] != b[i] {
+                    return false;
+                }
+                i += 1;
+            }
+            true
+        }
     }
-    None => false,
-};
+}
+
+const fn env_u32(v: Option<&str>) -> u32 {
+    match v {
+        None => 0,
+        Some(v) => {
+            let b = v.as_bytes();
+            let mut n = 0u32;
+            let mut i = 0;
+            while i < b.len() {
+                n = n * 10 + (b[i] - b'0') as u32;
+                i += 1;
+            }
+            n
+        }
+    }
+}
+
+const BOOT_FIT_EMMC: bool = env_eq(option_env!("K1_BOOT"), "emmc");
+const BOOT_FIT_SD: bool = env_eq(option_env!("K1_BOOT"), "sd");
+const BOOT_EMMC_FIT: bool = BOOT_FIT_EMMC || BOOT_FIT_SD;
+const NEXT_LBA: u32 = env_u32(option_env!("K1_NEXT_LBA"));
 // Where the FIT is read to before its images are copied out.
 const FIT_STAGING_ADDR: usize = 0x1000_0000;
 
@@ -267,7 +302,12 @@ fn main() {
         eeprom_i2c_init();
         // Load OpenSBI, the next stage and its DT from a FIT in eMMC boot1,
         // then start OpenSBI (fw_dynamic) with that next stage.
-        match fit::load_from_emmc(FIT_STAGING_ADDR) {
+        let src = fit::Source {
+            kind: if BOOT_FIT_SD { mmc::Kind::Sd } else { mmc::Kind::Emmc },
+            partition: if BOOT_FIT_SD { mmc::Partition::User } else { mmc::Partition::Boot1 },
+            lba: NEXT_LBA,
+        };
+        match fit::load(&src, FIT_STAGING_ADDR) {
             Ok(b) => {
                 println!(
                     "[bt0] OpenSBI @{:08x}, next @{:08x}, DT @{:08x}",
@@ -276,7 +316,7 @@ fn main() {
                 fit::start_opensbi(BOOT_HART_ID, &b);
             }
             Err(e) => {
-                println!("[bt0] eMMC FIT boot failed: {e:?}");
+                println!("[bt0] FIT boot failed: {e:?}");
                 unsafe { riscv::asm::wfi() };
             }
         }

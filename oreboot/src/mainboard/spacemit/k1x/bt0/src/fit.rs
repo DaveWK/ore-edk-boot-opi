@@ -1,27 +1,28 @@
-//! Load a U-Boot style FIT (external data, `mkimage -E`) from eMMC boot1 and
-//! start OpenSBI's fw_dynamic firmware with the FIT's next stage and DT.
+//! Load a U-Boot style FIT (external data, `mkimage -E`) from an eMMC hardware
+//! partition or raw SD card sectors, and start OpenSBI's fw_dynamic firmware
+//! with the FIT's next stage and DT.
 
 use core::arch::asm;
 use core::ptr::{addr_of, copy_nonoverlapping};
 use fdt::Fdt;
 
-use crate::emmc::{Emmc, Error as EmmcError, Partition};
+use crate::mmc::{Error as MmcError, Kind, Mmc, Partition};
 
 const SECTOR: usize = 512;
-// Largest FIT read from boot1 (the whole 4 MiB partition).
+// Largest FIT read (an eMMC boot partition, or the RV2's 4 MiB SD area).
 const MAX_FIT: usize = 4 * 1024 * 1024;
 
 #[derive(Debug)]
 pub enum Error {
-    Emmc(EmmcError),
+    Mmc(MmcError),
     NotFit,
     Missing(&'static str),
     TooBig(usize),
 }
 
-impl From<EmmcError> for Error {
-    fn from(e: EmmcError) -> Self {
-        Self::Emmc(e)
+impl From<MmcError> for Error {
+    fn from(e: MmcError) -> Self {
+        Self::Mmc(e)
     }
 }
 
@@ -54,18 +55,25 @@ fn image(fit: &Fdt, name: &str) -> Result<Image, Error> {
     })
 }
 
-pub fn load_from_emmc(staging: usize) -> Result<Boot, Error> {
-    let emmc = Emmc::init()?;
-    emmc.select(Partition::Boot1)?;
+/// Where the FIT is: card type, eMMC hardware partition, first sector.
+pub struct Source {
+    pub kind: Kind,
+    pub partition: Partition,
+    pub lba: u32,
+}
+
+pub fn load(src: &Source, staging: usize) -> Result<Boot, Error> {
+    let mmc = Mmc::init(src.kind)?;
+    mmc.select(src.partition)?;
     // FIT header first, to learn its size and where the image data ends.
-    emmc.read(0, 1, staging)?;
+    mmc.read(src.lba, 1, staging)?;
     if be32(staging) != 0xd00d_feed {
-        let _ = emmc.select(Partition::User);
+        let _ = mmc.select(Partition::User);
         return Err(Error::NotFit);
     }
     let header = be32(staging + 4) as usize;
     let data_base = (header + 3) & !3;
-    emmc.read(0, header.div_ceil(SECTOR), staging)?;
+    mmc.read(src.lba, header.div_ceil(SECTOR), staging)?;
     let fit = Fdt::new(unsafe { core::slice::from_raw_parts(staging as *const u8, header) })
         .map_err(|_| Error::NotFit)?;
     let conf = fit
@@ -87,12 +95,12 @@ pub fn load_from_emmc(staging: usize) -> Result<Boot, Error> {
         .max()
         .unwrap();
     if end > MAX_FIT {
-        let _ = emmc.select(Partition::User);
+        let _ = mmc.select(Partition::User);
         return Err(Error::TooBig(end));
     }
-    println!("[bt0] reading FIT from eMMC boot1 ({end} bytes)");
-    emmc.read(0, end.div_ceil(SECTOR), staging)?;
-    emmc.select(Partition::User)?;
+    println!("[bt0] reading FIT at sector {} ({end} bytes)", src.lba);
+    mmc.read(src.lba, end.div_ceil(SECTOR), staging)?;
+    mmc.select(Partition::User)?;
 
     let place = |i: &Image, dest: usize| {
         unsafe {

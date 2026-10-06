@@ -6,7 +6,8 @@
 #   fsbl.bin   BootROM image (oreboot bt0, signed by oreboot's packer) for the
 #              boot device's FSBL slot (eMMC boot0 + 512 on the R2S)
 #   next.itb   FIT: OpenSBI fw_dynamic, EDK2 at 0x200000, board DT
-#   next.img   next.itb zero-padded to the board's next-stage area (R2S: boot1)
+#   next.img   next.itb zero-padded to the board's next-stage area
+#              (R2S: eMMC boot1; RV2: microSD sectors from LBA 8192)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BOARD=${1:?board}
@@ -74,9 +75,9 @@ open(sys.argv[2], "wb").write(data + b"\0" * (int(sys.argv[3]) - len(data)))
 PY
 
 if [ -n "$BT0_BOOT" ]; then
-  echo "== oreboot bt0 (K1_BOOT=$BT0_BOOT, K1_CS_NUM=$CS_NUM)"
+  echo "== oreboot bt0 (K1_BOOT=$BT0_BOOT, K1_NEXT_LBA=$NEXT_LBA, K1_CS_NUM=$CS_NUM)"
   (cd "$ROOT/oreboot/src/mainboard/spacemit/k1x" &&
-   K1_CS_NUM=$CS_NUM K1_BOOT=$BT0_BOOT cargo --locked xtask make --release)
+   K1_CS_NUM=$CS_NUM K1_BOOT=$BT0_BOOT K1_NEXT_LBA=$NEXT_LBA cargo --locked xtask make --release)
   cp "$ROOT/oreboot/target/riscv64imac-unknown-none-elf/release/spacemit-k1x-bt0.bin" "$O/fsbl.bin"
 else
   echo "== oreboot bt0: no next-stage load path for $BOARD yet; fsbl.bin not built"
