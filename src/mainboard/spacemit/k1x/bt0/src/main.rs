@@ -18,6 +18,8 @@ use embedded_hal_nb::serial::Write;
 use riscv::register::{marchid, mhartid, mimpid, mip, mvendorid};
 
 mod dram;
+mod emmc;
+mod fit;
 mod uart;
 
 use uart::K1XSerial;
@@ -62,8 +64,19 @@ const MEM_TEST_FULL: bool = false;
 
 const DUMP_FLASH: bool = false;
 
-// Hand off to a next stage appended to this image (see main()).
-const PAYLOAD_HANDOFF: bool = true;
+// K1_BOOT=emmc: load a FIT (OpenSBI, next stage, DT) from eMMC boot1.
+const BOOT_EMMC_FIT: bool = match option_env!("K1_BOOT") {
+    Some(v) => {
+        let b = v.as_bytes();
+        b.len() == 4 && b[0] == b'e' && b[1] == b'm' && b[2] == b'm' && b[3] == b'c'
+    }
+    None => false,
+};
+// Where the FIT is read to before its images are copied out.
+const FIT_STAGING_ADDR: usize = 0x1000_0000;
+
+// Otherwise hand off to a next stage appended to this image (see main()).
+const PAYLOAD_HANDOFF: bool = !BOOT_EMMC_FIT;
 const PAYLOAD_OFFSET: usize = 0x0001_0000;
 const PAYLOAD_ADDR: usize = 0x0400_0000;
 // Up to the end of the 256K SRAM the BootROM loads the image into.
@@ -246,6 +259,24 @@ fn main() {
 
     if DUMP_FLASH {
         dump_block(FLASH_BASE, FLASH_SIZE, 32);
+    }
+
+    if BOOT_EMMC_FIT {
+        // Load OpenSBI, the next stage and its DT from a FIT in eMMC boot1,
+        // then start OpenSBI (fw_dynamic) with that next stage.
+        match fit::load_from_emmc(FIT_STAGING_ADDR) {
+            Ok(b) => {
+                println!(
+                    "[bt0] OpenSBI @{:08x}, next @{:08x}, DT @{:08x}",
+                    b.firmware, b.next, b.fdt
+                );
+                fit::start_opensbi(BOOT_HART_ID, &b);
+            }
+            Err(e) => {
+                println!("[bt0] eMMC FIT boot failed: {e:?}");
+                unsafe { riscv::asm::wfi() };
+            }
+        }
     }
 
     if PAYLOAD_HANDOFF {

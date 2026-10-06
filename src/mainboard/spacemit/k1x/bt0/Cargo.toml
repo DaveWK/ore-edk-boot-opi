@@ -10,6 +10,7 @@ embedded-hal-nb = "=1.0.0"
 nb = "1"
 riscv = "0.10.1"
 spin = "0.9"
+fdt = "0.1.5"
 
 log = { path = "../../../../lib/log" }
 util = { path = "../../../../lib/util" }
