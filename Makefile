@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-BOARDS := orangepi-r2s orangepi-rv2
+BOARDS := orangepi-r2s orangepi-rv2 orangepi-rv2-nor
 TARGET ?= DEBUG
 
 .PHONY: all $(BOARDS) submodules clean

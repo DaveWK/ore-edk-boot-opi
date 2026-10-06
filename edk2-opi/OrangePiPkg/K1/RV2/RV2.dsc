@@ -20,8 +20,9 @@
   FLASH_DEFINITION               = OrangePiPkg/K1/RV2/RV2.fdf
 
   DEFINE DEBUG_ON_SERIAL_PORT    = TRUE
-  # No NOR variable store is used yet: UEFI variables live in RAM.
-  DEFINE EMU_VARIABLE_NV_MODE_ENABLE = TRUE
+  # UEFI variables live in the SPI NOR (0x2A0000-0x360000, SpacemiT's layout),
+  # whether the firmware was loaded from the NOR or from the microSD card.
+  DEFINE EMU_VARIABLE_NV_MODE_ENABLE = FALSE
 
 [SkuIds]
   0|DEFAULT
@@ -38,6 +39,8 @@
   SpacemitSecLib|Silicon/Spacemit/K1/Library/SpacemitSecLib/SpacemitSecLib.inf
 
 [LibraryClasses.common]
+  # EmbeddedPkg's copy plus the RV2's XMC flash ID
+  NorFlashInfoLib|OrangePiPkg/Library/NorFlashInfoLib/NorFlashInfoLib.inf
   PlatformBootManagerLib|Silicon/Spacemit/Library/PlatformBootManagerLib/PlatformBootManagerLib.inf
 
   NetLib|NetworkPkg/Library/DxeNetLib/DxeNetLib.inf

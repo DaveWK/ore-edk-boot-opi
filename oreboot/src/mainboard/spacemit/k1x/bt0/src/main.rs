@@ -105,7 +105,10 @@ const fn env_u32(v: Option<&str>) -> u32 {
 
 const BOOT_FIT_EMMC: bool = env_eq(option_env!("K1_BOOT"), "emmc");
 const BOOT_FIT_SD: bool = env_eq(option_env!("K1_BOOT"), "sd");
-const BOOT_EMMC_FIT: bool = BOOT_FIT_EMMC || BOOT_FIT_SD;
+// K1_BOOT=nor: the FIT is in the SPI NOR, read through its memory-mapped
+// window; K1_NEXT_LBA counts 512-byte sectors from the start of the flash.
+const BOOT_FIT_NOR: bool = env_eq(option_env!("K1_BOOT"), "nor");
+const BOOT_EMMC_FIT: bool = BOOT_FIT_EMMC || BOOT_FIT_SD || BOOT_FIT_NOR;
 const NEXT_LBA: u32 = env_u32(option_env!("K1_NEXT_LBA"));
 // K1_PCIE_PWR_GPIO: a GPIO that switches a PCIe slot's 3.3 V supply on (OrangePi
 // RV2: 116, the M.2 slot's vpcie3v3 regulator). 0 means none.
@@ -312,8 +315,13 @@ fn main() {
         // Load OpenSBI, the next stage and its DT from a FIT in eMMC boot1,
         // then start OpenSBI (fw_dynamic) with that next stage.
         let src = fit::Source {
-            kind: if BOOT_FIT_SD { mmc::Kind::Sd } else { mmc::Kind::Emmc },
-            partition: if BOOT_FIT_SD { mmc::Partition::User } else { mmc::Partition::Boot1 },
+            medium: if BOOT_FIT_NOR {
+                fit::Medium::Nor
+            } else if BOOT_FIT_SD {
+                fit::Medium::Mmc(mmc::Kind::Sd, mmc::Partition::User)
+            } else {
+                fit::Medium::Mmc(mmc::Kind::Emmc, mmc::Partition::Boot1)
+            },
             lba: NEXT_LBA,
         };
         match fit::load(&src, FIT_STAGING_ADDR) {

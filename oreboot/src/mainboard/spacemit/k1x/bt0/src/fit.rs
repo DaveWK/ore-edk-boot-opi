@@ -55,16 +55,56 @@ fn image(fit: &Fdt, name: &str) -> Result<Image, Error> {
     })
 }
 
-/// Where the FIT is: card type, eMMC hardware partition, first sector.
+/// Memory-mapped (XIP) window of the QSPI NOR flash.
+const NOR_MMIO_BASE: usize = 0xb800_0000;
+
+/// Where the FIT is: an MMC card (type and eMMC hardware partition) or the
+/// memory-mapped SPI NOR, and its first 512-byte sector there.
+pub enum Medium {
+    Mmc(Kind, Partition),
+    Nor,
+}
+
 pub struct Source {
-    pub kind: Kind,
-    pub partition: Partition,
+    pub medium: Medium,
     pub lba: u32,
 }
 
+/// Reads sectors from an MMC card, or copies them out of the NOR window.
+enum Reader {
+    Mmc(Mmc),
+    Nor,
+}
+
+impl Reader {
+    fn read(&self, lba: u32, count: usize, dest: usize) -> Result<(), Error> {
+        match self {
+            Reader::Mmc(m) => Ok(m.read(lba, count, dest)?),
+            Reader::Nor => {
+                let src = NOR_MMIO_BASE + lba as usize * SECTOR;
+                unsafe { copy_nonoverlapping(src as *const u8, dest as *mut u8, count * SECTOR) };
+                Ok(())
+            }
+        }
+    }
+
+    fn select(&self, p: Partition) -> Result<(), Error> {
+        match self {
+            Reader::Mmc(m) => Ok(m.select(p)?),
+            Reader::Nor => Ok(()),
+        }
+    }
+}
+
 pub fn load(src: &Source, staging: usize) -> Result<Boot, Error> {
-    let mmc = Mmc::init(src.kind)?;
-    mmc.select(src.partition)?;
+    let mmc = match src.medium {
+        Medium::Mmc(kind, partition) => {
+            let m = Mmc::init(kind)?;
+            m.select(partition)?;
+            Reader::Mmc(m)
+        }
+        Medium::Nor => Reader::Nor,
+    };
     // FIT header first, to learn its size and where the image data ends.
     mmc.read(src.lba, 1, staging)?;
     if be32(staging) != 0xd00d_feed {
