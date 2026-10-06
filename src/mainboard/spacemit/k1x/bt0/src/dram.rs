@@ -9,7 +9,12 @@ const DDR_TRAINING_INFO: usize = 0xC080_0000;
 // data rate in mega transfers, currently hardcoded
 const DATA_RATE: u32 = 2400;
 // NOTE: This comes from the DT in U-Boot. Default is 1 otherwise.
-const CS_NUM: u32 = 2;
+// Set per board at build time with K1_CS_NUM=1 or 2 (e.g. OrangePi R2S: 1,
+// OrangePi RV2 4 GiB: 2); defaults to 2 as before.
+const CS_NUM: u32 = match option_env!("K1_CS_NUM") {
+    Some(v) => (v.as_bytes()[0] - b'0') as u32,
+    None => 2,
+};
 const DDRC_BASE: usize = 0xc000_0000;
 
 const DFI_PHY_USER_COMMAND_0: usize = DDRC_BASE + 0x13D0;

@@ -61,6 +61,13 @@ const MEM_TEST: bool = true;
 const MEM_TEST_FULL: bool = false;
 
 const DUMP_FLASH: bool = false;
+
+// Hand off to a next stage appended to this image (see main()).
+const PAYLOAD_HANDOFF: bool = true;
+const PAYLOAD_OFFSET: usize = 0x0001_0000;
+const PAYLOAD_ADDR: usize = 0x0400_0000;
+// Up to the end of the 256K SRAM the BootROM loads the image into.
+const PAYLOAD_MAX_SIZE: usize = 0xc084_0000 - (0xc080_1000 + PAYLOAD_OFFSET);
 const BOOT_FLASH: bool = false;
 
 const STORAGE_API_P_ADDR: usize = 0xC083_8498;
@@ -239,6 +246,26 @@ fn main() {
 
     if DUMP_FLASH {
         dump_block(FLASH_BASE, FLASH_SIZE, 32);
+    }
+
+    if PAYLOAD_HANDOFF {
+        // The FSBL image carries the next stage (U-Boot SPL, linked to run
+        // from DRAM) at a fixed offset behind bt0. Copy it out of SRAM and
+        // run it with DRAM up; it loads OpenSBI and U-Boot proper.
+        let src = ini_pc + PAYLOAD_OFFSET;
+        println!("[bt0] Copy next stage {src:08x} -> {PAYLOAD_ADDR:08x} ({PAYLOAD_MAX_SIZE} bytes)");
+        copy(src, PAYLOAD_ADDR, PAYLOAD_MAX_SIZE);
+        println!("[bt0] Jump to next stage @{PAYLOAD_ADDR:08x}");
+        unsafe {
+            asm!(
+                "fence.i",
+                "jr {entry}",
+                entry = in(reg) PAYLOAD_ADDR,
+                in("a0") BOOT_HART_ID,
+                in("a1") 0usize,
+                options(noreturn)
+            );
+        }
     }
 
     if BOOT_FLASH {
