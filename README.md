@@ -61,7 +61,13 @@ These steps write boot firmware. Keep a raw backup of eMMC boot0 and boot1 first
 1. Write `next.img` to the eMMC boot1 hardware partition.
 2. Write `bt0.bin`, zero-padded to the existing FSBL slot, into eMMC boot0 at offset 512. Leave the bootinfo header in the first 512 bytes as it is.
 
-To try an image without writing boot0, hold the download button and run:
+To try an image without writing boot0, put the R2S in download mode:
+
+1. With the board powered off, hold down the download button.
+2. Plug the bottom USB-A port into the workstation, then power the board on.
+3. The BootROM shows up on the workstation as USB device `361c:1001`.
+
+Then run:
 
     fastboot stage out/r2s/bt0.bin
     fastboot continue
