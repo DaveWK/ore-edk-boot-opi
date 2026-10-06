@@ -54,6 +54,10 @@ Requirements:
 - `next.img`: `next.itb` zero-padded to the next-stage area (R2S: the 4 MiB eMMC boot1 partition; RV2: the 4 MiB microSD GPT partition `boot1`).
 - `SHA256SUMS`.
 
+## Releases
+
+Pushing a tag `v*` builds `make r2s`, `make rv2` and `make rv2-nor` and attaches `<image>-bt0.bin`, `<image>-next.itb`, `<image>-next.img` and `SHA256SUMS` to that tag's GitHub release (`.github/workflows/release.yml`). The workflow runs only on a private self-hosted runner with the labels `self-hosted, linux, x64, fedora44`, which needs the build requirements above installed.
+
 ## Installing on the R2S
 
 These steps write boot firmware. Keep a raw backup of eMMC boot0 and boot1 first. Download mode is the recovery path.
