@@ -262,6 +262,9 @@ fn main() {
     }
 
     if BOOT_EMMC_FIT {
+        // Without U-Boot SPL nothing else sets up the board EEPROM's I2C
+        // bus, which the next stage (EDK2) reads early.
+        eeprom_i2c_init();
         // Load OpenSBI, the next stage and its DT from a FIT in eMMC boot1,
         // then start OpenSBI (fw_dynamic) with that next stage.
         match fit::load_from_emmc(FIT_STAGING_ADDR) {
@@ -318,6 +321,20 @@ fn main() {
 }
 
 // jump to main stage or payload
+// I2C2 (TWSI2) carries the board TLV EEPROM; U-Boot SPL's i2c_early_init()
+// and SpacemiT's FSBL set it up the same way.
+const APBC_TWSI2_CLK_RST: usize = 0xd401_5038; // bit 0 bus clk, bit 1 func clk, bit 2 reset
+const MFP_GPIO_84: usize = 0xd401_e154;
+const MFP_GPIO_85: usize = 0xd401_e158;
+// MUX_MODE4 | EDGE_NONE | PULL_UP | PAD_1V8_DS2
+const I2C_PIN_CONFIG: u32 = 4 | (1 << 6) | (6 << 13) | (1 << 12);
+
+fn eeprom_i2c_init() {
+    write32(APBC_TWSI2_CLK_RST, (read32(APBC_TWSI2_CLK_RST) | 0b11) & !(1 << 2));
+    write32(MFP_GPIO_84, I2C_PIN_CONFIG);
+    write32(MFP_GPIO_85, I2C_PIN_CONFIG);
+}
+
 fn exec_payload(addr: usize) {
     unsafe {
         let f: EntryPoint = transmute(addr);
