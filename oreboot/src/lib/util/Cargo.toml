@@ -1,0 +1,8 @@
+[package]
+name = "util"
+version = "0.1.0"
+authors = ["Oreboot Authors"]
+edition = "2021"
+
+[dependencies]
+log = { path = "../log" }

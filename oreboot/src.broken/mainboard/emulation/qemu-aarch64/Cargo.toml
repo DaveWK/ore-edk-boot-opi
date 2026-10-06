@@ -1,0 +1,19 @@
+[package]
+name = "qemu-aarch64"
+version = "0.1.0"
+authors = ["Oreboot Authors"]
+edition = "2021"
+
+[dependencies]
+console = { path = "../../../console" }
+device_tree = { path = "../../../lib/device_tree" }
+payloads = { path = "../../../../payloads" }
+print = { path = "../../../lib/print" }
+
+[dependencies.oreboot-cpu]
+path = "../../../cpu"
+features = ["armltd_cortex_a53"]
+
+[dependencies.oreboot-drivers]
+path = "../../../drivers"
+features = ["uart_pl011"]

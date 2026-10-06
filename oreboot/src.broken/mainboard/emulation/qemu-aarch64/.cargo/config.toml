@@ -1,0 +1,10 @@
+[build]
+target = "aarch64-unknown-none-softfloat"
+
+[target.aarch64-unknown-none-softfloat]
+rustflags = [
+  "-C",
+  "link-arg=-Tlink.ld",
+  "-Z",
+  "emit-stack-sizes",
+]

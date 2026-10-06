@@ -1,0 +1,28 @@
+[workspace]
+# in general, avoid wildcards, to make sure we get only what we want.
+members = [
+  "src/arch",
+  "src/cpu",
+  "src/lib/*",
+  "src/mainboard/*/*/*",
+  "src/soc",
+  "xtask",
+]
+default-members = ["xtask"]
+resolver = "2"
+
+[profile.release]
+opt-level = 'z' # Optimize for size.
+lto = true
+# Leave debug symbol information on release compilation mode
+# That's okay, these symbols won't appear on flash binary
+debug = true
+
+[profile.dev]
+opt-level = 1 # Use slightly better optimizations.
+overflow-checks = false # Disable integer overflow checks.
+lto = true
+
+[workspace.dependencies]
+embedded-hal = "=1.0.0"
+embedded-hal-nb = "=1.0.0"

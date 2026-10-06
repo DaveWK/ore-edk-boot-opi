@@ -1,0 +1,40 @@
+/dts-v1/;
+
+/ {
+    #address-cells = <1>;
+    #size-cells = <1>;
+
+    flash-info {
+        compatible = "ore-flashinfo";
+        board-name = "Nezha";
+        category = "Sunxi";
+        board-url = "https://d1.docs.aw-ol.com/en/d1_dev/";
+        areas {
+            area@0 {
+                description = "Boot Blob and Romstage";
+                size = <0x8000>; // 32KiB; SRAM size
+                file = "$(BOOTBLOB)";
+            };
+            area@1 {
+                description = "Payloader/Decompressor/SBI";
+                size = <0x18000>; // 96KiB
+                file = "$(PAYLOADER)";
+            };
+            area@2 {
+                description = "Fixed DTFS";
+                size = <0x10000>; // 64KiB
+                file = "$(FIXED_DTFS)";
+            };
+            area@3 {
+                description = "Payload A";
+                size = <0xfc0000>; // 16MB-256K
+                file = "$(PAYLOAD_A)";
+            };
+            area@4 {
+                description = "DTB";
+                size = <0x10000>; // 64KiB
+                file = "$(DTB)";
+            };
+        };
+    };
+};

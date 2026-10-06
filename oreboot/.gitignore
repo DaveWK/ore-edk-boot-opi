@@ -1,0 +1,34 @@
+*.dtb
+oreboot.asm
+*.\#
+*.bin
+*.debug
+*.elf
+*.o
+*.out
+*.pyc
+*.sw[po]
+/*.rom
+
+#
+# KDE editors create lots of backup files whenever
+# a file is edited, so just ignore them
+*~
+*.kate-swp
+# Ignore Kdevelop project file
+*.kdev4
+
+#Added by cargo
+#
+#already existing elements are commented out
+
+coverall
+target
+**/*.rs.bk
+debug.log
+
+# Ignore all intellij related files
+*.idea
+
+# gdb history files
+.gdb_history

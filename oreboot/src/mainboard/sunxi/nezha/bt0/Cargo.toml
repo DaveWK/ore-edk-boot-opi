@@ -1,0 +1,29 @@
+[package]
+name = "oreboot-nezha-bt0"
+version = "0.1.0"
+authors = [
+  "Luo Jia <me@luojia.cc>",
+  "Daniel Maslowski <info@orangecms.org>",
+  "YdrMaster <ydrml@hotmail.com>",
+]
+edition = "2021"
+
+[dependencies]
+embedded-hal.workspace = true
+embedded-hal-nb.workspace = true
+nb = "1"
+riscv = { version = "=0.12.1", features = ["critical-section-single-hart"] }
+spin = "0.9"
+
+log = { path = "../../../../lib/log" }
+oreboot-soc = { path = "../../../../soc", features = ["sunxi_d1"] }
+
+[features]
+default = ["nezha"]
+
+nezha = ["nand"]
+lichee = ["nor"]
+
+nand = []
+nor = []
+mmc = []
