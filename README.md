@@ -64,7 +64,7 @@ These steps write boot firmware. Keep a raw backup of eMMC boot0 and boot1 first
 To try an image without writing boot0, put the R2S in download mode:
 
 1. With the board powered off, hold down the download button.
-2. Plug the bottom USB-A port into the workstation, then power the board on.
+2. Connect the bottom USB-A port to the workstation with a USB-A to USB-A cable, then power the board on.
 3. The BootROM shows up on the workstation as USB device `361c:1001`.
 
 Then run:
