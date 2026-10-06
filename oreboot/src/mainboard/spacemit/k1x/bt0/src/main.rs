@@ -17,10 +17,13 @@ use core::{
 use embedded_hal_nb::serial::Write;
 use riscv::register::{marchid, mhartid, mimpid, mip, mvendorid};
 
+mod cache;
 mod dram;
+mod fastboot;
 mod fit;
 mod mmc;
 mod uart;
+mod usb;
 
 use uart::K1XSerial;
 use util::{
@@ -117,6 +120,13 @@ const NEXT_LBA: u32 = env_u32(option_env!("K1_NEXT_LBA"));
 const PCIE_PWR_GPIO: u32 = env_u32(option_env!("K1_PCIE_PWR_GPIO"));
 // Where the FIT is read to before its images are copied out.
 const FIT_STAGING_ADDR: usize = 0x1000_0000;
+// K1_FASTBOOT=no disables the fastboot flasher bt0 otherwise serves when the
+// BootROM started it from USB download mode. K1_PRODUCT is its product name.
+const FASTBOOT: bool = !env_eq(option_env!("K1_FASTBOOT"), "no");
+const PRODUCT: &str = match option_env!("K1_PRODUCT") {
+    Some(p) => p,
+    None => "spacemit-k1",
+};
 
 // Otherwise hand off to a next stage appended to this image (see main()).
 const PAYLOAD_HANDOFF: bool = !BOOT_EMMC_FIT;
@@ -302,6 +312,18 @@ fn main() {
 
     if DUMP_FLASH {
         dump_block(FLASH_BASE, FLASH_SIZE, 32);
+    }
+
+    // Started from USB download mode (fastboot stage + continue): the
+    // BootROM's storage API is its USB loader in SRAM. Serve fastboot so the
+    // host can write the board's storage, then boot as usual.
+    if FASTBOOT && boot_mode as usize == USB_BOOT_ENTRY {
+        println!("[bt0] started from USB download mode: serving fastboot");
+        fastboot::run(&fastboot::Board {
+            name: PRODUCT,
+            disk: if BOOT_FIT_EMMC { mmc::Kind::Emmc } else { mmc::Kind::Sd },
+        });
+        println!("[bt0] fastboot done, booting");
     }
 
     if BOOT_EMMC_FIT {

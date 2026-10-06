@@ -1,11 +1,12 @@
-//! Minimal polled (PIO) eMMC / SD reader for the SpacemiT K1 SDHCI.
+//! Minimal polled (PIO) eMMC / SD driver for the SpacemiT K1 SDHCI.
 //!
 //! eMMC is SDH2 at 0xd428_1000 (OrangePi R2S), SD is SDH0 at 0xd428_0000
 //! (OrangePi RV2). When the mask ROM booted from the card, the controller is
 //! clocked, pinmuxed and the card powered; for download-mode boots the
 //! controller clock and reset are enabled here. The card is re-initialised at
-//! a low clock in 1-bit mode and read in 512-byte sectors with CMD17. It is
-//! only meant to fetch the next boot stage.
+//! a low clock in 1-bit mode and read in 512-byte sectors with CMD17, which
+//! is all the boot path needs. The fastboot flasher also writes (CMD25) and
+//! widens the bus first.
 
 use util::mmio::{read16, read32, read8, write16, write32, write8};
 
@@ -50,8 +51,19 @@ const PRESENT_DAT_INHIBIT: u32 = 1 << 1;
 
 const INT_CMD_COMPLETE: u32 = 1 << 0;
 const INT_XFER_COMPLETE: u32 = 1 << 1;
+const INT_BUF_WRITE_READY: u32 = 1 << 4;
 const INT_BUF_READ_READY: u32 = 1 << 5;
 const INT_ERROR: u32 = 1 << 15;
+
+// Transfer mode
+const TM_BLOCK_COUNT: u16 = 1 << 1;
+const TM_AUTO_CMD12: u16 = 1 << 2;
+const TM_READ: u16 = 1 << 4;
+const TM_MULTI: u16 = 1 << 5;
+
+// Host control 1: data bus width
+const HC_4BIT: u8 = 1 << 1;
+const HC_8BIT: u8 = 1 << 5;
 
 const CLOCK_INT_EN: u16 = 1 << 0;
 const CLOCK_INT_STABLE: u16 = 1 << 1;
@@ -168,6 +180,20 @@ impl Mmc {
 
 
     fn command(&self, index: u8, arg: u32, flags: u16) -> Result<[u32; 4], Error> {
+        // A data command here is a single-block read.
+        self.command_data(index, arg, flags, TM_READ, 1)
+    }
+
+    /// Issue a command; with DATA_PRESENT, `mode` and `blocks` program the
+    /// transfer (the data itself is moved by the caller).
+    fn command_data(
+        &self,
+        index: u8,
+        arg: u32,
+        flags: u16,
+        mode: u16,
+        blocks: usize,
+    ) -> Result<[u32; 4], Error> {
         let busy = flags & 3 == RESP_48_BUSY || flags & DATA_PRESENT != 0;
         wait("cmd inhibit", || self.r32(PRESENT_STATE) & PRESENT_CMD_INHIBIT == 0)?;
         if busy {
@@ -177,9 +203,8 @@ impl Mmc {
         self.w32(ARGUMENT, arg);
         if flags & DATA_PRESENT != 0 {
             self.w16(BLOCK_SIZE, SECTOR as u16);
-            self.w16(BLOCK_COUNT, 1);
-            // Single block, card to host
-            self.w16(TRANSFER_MODE, 1 << 4);
+            self.w16(BLOCK_COUNT, blocks as u16);
+            self.w16(TRANSFER_MODE, mode);
         } else {
             self.w16(TRANSFER_MODE, 0);
         }
@@ -254,10 +279,11 @@ impl Mmc {
                 m.w32(PHY_CTRL, m.r32(PHY_CTRL) | 0x3);
                 m.w32(PHY_PADCFG, m.r32(PHY_PADCFG) | (1 << 5));
             }
-            Kind::Sd => {
-                m.w32(TX_CFG, m.r32(TX_CFG) | (1 << 30));
-            }
+            Kind::Sd => {}
         }
+        // TX_INT_CLK_SEL: the data hold time writes need at legacy speed
+        // (U-Boot's k1x_sdhci.c sets it for legacy and HS modes).
+        m.w32(TX_CFG, m.r32(TX_CFG) | (1 << 30));
         // Keep the card clock running while we poll.
         m.w32(OP_EXT, m.r32(OP_EXT) | (1 << 11) | (1 << 12));
 
@@ -364,28 +390,189 @@ impl Mmc {
         for i in 0..count {
             let sector = lba + i as u32;
             let arg = if self.block_addressing { sector } else { sector * SECTOR as u32 };
-            self.command(17, arg, R1 | DATA_PRESENT)?;
-            wait("read buffer", || {
-                self.r32(INT_STATUS) & (INT_BUF_READ_READY | INT_ERROR) != 0
-            })?;
-            let status = self.r32(INT_STATUS);
-            if status & INT_ERROR != 0 {
-                self.w32(INT_STATUS, 0xffff_ffff);
-                return Err(Error::Command(17, status));
-            }
-            self.w32(INT_STATUS, INT_BUF_READ_READY);
-            let base = dest + i * SECTOR;
-            for w in 0..SECTOR / 4 {
-                write32(base + w * 4, self.r32(BUFFER));
-            }
-            wait("transfer complete", || {
-                self.r32(INT_STATUS) & (INT_XFER_COMPLETE | INT_ERROR) != 0
-            })?;
-            self.w32(INT_STATUS, INT_XFER_COMPLETE);
+            self.read_block(17, arg, dest + i * SECTOR)?;
             if i % 2048 == 2047 {
                 print!(".");
             }
         }
         Ok(())
+    }
+
+    /// One single-block read command (CMD17, or CMD8 for EXT_CSD).
+    fn read_block(&self, index: u8, arg: u32, dest: usize) -> Result<(), Error> {
+        self.command(index, arg, R1 | DATA_PRESENT)?;
+        wait("read buffer", || {
+            self.r32(INT_STATUS) & (INT_BUF_READ_READY | INT_ERROR) != 0
+        })?;
+        let status = self.r32(INT_STATUS);
+        if status & INT_ERROR != 0 {
+            self.w32(INT_STATUS, 0xffff_ffff);
+            return Err(Error::Command(index, status));
+        }
+        self.w32(INT_STATUS, INT_BUF_READ_READY);
+        for w in 0..SECTOR / 4 {
+            write32(dest + w * 4, self.r32(BUFFER));
+        }
+        wait("transfer complete", || {
+            self.r32(INT_STATUS) & (INT_XFER_COMPLETE | INT_ERROR) != 0
+        })?;
+        self.w32(INT_STATUS, INT_XFER_COMPLETE);
+        Ok(())
+    }
+
+    /// The card's EXT_CSD register (eMMC only).
+    pub fn ext_csd(&self) -> Result<[u8; SECTOR], Error> {
+        let mut ext = [0u8; SECTOR];
+        self.read_block(8, 0, ext.as_mut_ptr() as usize)?;
+        Ok(ext)
+    }
+
+    /// Size in sectors of an eMMC hardware partition.
+    pub fn sectors(&self, p: Partition) -> Result<u64, Error> {
+        let ext = self.ext_csd()?;
+        Ok(match p {
+            Partition::User => u32::from_le_bytes([ext[212], ext[213], ext[214], ext[215]]) as u64,
+            // BOOT_SIZE_MULT x 128 KiB
+            Partition::Boot0 | Partition::Boot1 => ext[226] as u64 * 256,
+        })
+    }
+
+    /// Wait until the card has finished programming and is back in the
+    /// transfer state.
+    fn wait_ready(&self) -> Result<(), Error> {
+        for _ in 0..10_000_000 {
+            let r = self.command(13, self.rca << 16, R1)?[0];
+            if (r >> 9) & 0xf == 4 && r & (1 << 8) != 0 {
+                return Ok(());
+            }
+        }
+        Err(Error::NotReady)
+    }
+
+    /// Recover the controller and card after a failed data transfer.
+    fn abort(&self) {
+        self.w32(INT_STATUS, 0xffff_ffff);
+        self.w8(SOFTWARE_RESET, 0x06);
+        let _ = wait("reset", || self.r8(SOFTWARE_RESET) & 0x06 == 0);
+        let _ = self.command(12, 0, R1B);
+        let _ = self.wait_ready();
+    }
+
+    /// Write `count` sectors from memory at `src` starting at `lba`, with
+    /// multiple-block writes (CMD25 and an automatic CMD12).
+    pub fn write(&self, lba: u32, count: usize, src: usize) -> Result<(), Error> {
+        let mut done = 0;
+        while done < count {
+            let n = (count - done).min(2048);
+            let sector = lba + done as u32;
+            let arg = if self.block_addressing { sector } else { sector * SECTOR as u32 };
+            let r = if n == 1 {
+                self.command_data(24, arg, R1 | DATA_PRESENT, 0, 1)
+            } else {
+                self.command_data(25, arg, R1 | DATA_PRESENT, TM_BLOCK_COUNT | TM_AUTO_CMD12 | TM_MULTI, n)
+            };
+            r?;
+            for i in 0..n {
+                let ready = wait("write buffer", || {
+                    self.r32(INT_STATUS) & (INT_BUF_WRITE_READY | INT_ERROR) != 0
+                });
+                let status = self.r32(INT_STATUS);
+                if ready.is_err() || status & INT_ERROR != 0 {
+                    self.abort();
+                    return Err(Error::Command(if n == 1 { 24 } else { 25 }, status));
+                }
+                self.w32(INT_STATUS, INT_BUF_WRITE_READY);
+                let base = src + (done + i) * SECTOR;
+                for w in 0..SECTOR / 4 {
+                    self.w32(BUFFER, read32(base + w * 4));
+                }
+            }
+            let complete = wait("write complete", || {
+                self.r32(INT_STATUS) & (INT_XFER_COMPLETE | INT_ERROR) != 0
+            });
+            let status = self.r32(INT_STATUS);
+            if complete.is_err() || status & INT_ERROR != 0 {
+                self.abort();
+                return Err(Error::Command(25, status));
+            }
+            self.w32(INT_STATUS, INT_XFER_COMPLETE);
+            self.wait_ready()?;
+            done += n;
+        }
+        Ok(())
+    }
+
+    /// Set the data bus width (8, 4 or 1 bits) on the card and the host.
+    pub fn set_width(&mut self, width: u8) -> Result<(), Error> {
+        match self.kind {
+            Kind::Emmc => {
+                let v = match width {
+                    8 => 2,
+                    4 => 1,
+                    _ => 0,
+                };
+                self.switch(3, 183, v)?;
+            }
+            Kind::Sd => {
+                self.command(55, self.rca << 16, R1)?;
+                self.command(6, if width == 4 { 2 } else { 0 }, R1)?;
+            }
+        }
+        let hc = match width {
+            8 => HC_8BIT,
+            4 => HC_4BIT,
+            _ => 0,
+        };
+        self.w8(HOST_CONTROL, (self.r8(HOST_CONTROL) & !(HC_4BIT | HC_8BIT)) | hc);
+        Ok(())
+    }
+
+    /// Change the card clock.
+    pub fn set_khz(&self, khz: u32) -> Result<(), Error> {
+        self.set_clock(khz)
+    }
+
+    /// TX_INT_CLK_SEL on or off (write data hold time).
+    pub fn set_tx_hold(&self, on: bool) {
+        let v = self.r32(TX_CFG) & !(1 << 30);
+        self.w32(TX_CFG, v | if on { 1 << 30 } else { 0 });
+    }
+
+    /// Move to the widest data bus the card answers on (eMMC 8 then 4 bits,
+    /// SD 4 bits), keeping 1 bit when a test read fails. Returns the width.
+    pub fn widen(&mut self) -> u8 {
+        let mut probe = [0u8; SECTOR];
+        let addr = probe.as_mut_ptr() as usize;
+        match self.kind {
+            Kind::Emmc => {
+                for (width, ext_value, hc) in [(8u8, 2u32, HC_8BIT), (4, 1, HC_4BIT)] {
+                    if self.switch(3, 183, ext_value).is_err() {
+                        continue;
+                    }
+                    self.w8(HOST_CONTROL, (self.r8(HOST_CONTROL) & !(HC_4BIT | HC_8BIT)) | hc);
+                    if self.read_block(8, 0, addr).is_ok() {
+                        return width;
+                    }
+                    self.w8(HOST_CONTROL, self.r8(HOST_CONTROL) & !(HC_4BIT | HC_8BIT));
+                    let _ = self.switch(3, 183, 0);
+                }
+                1
+            }
+            Kind::Sd => {
+                let ok = self.command(55, self.rca << 16, R1).is_ok()
+                    && self.command(6, 2, R1).is_ok();
+                if ok {
+                    self.w8(HOST_CONTROL, (self.r8(HOST_CONTROL) & !HC_8BIT) | HC_4BIT);
+                    let arg = 0;
+                    if self.read_block(17, arg, addr).is_ok() {
+                        return 4;
+                    }
+                    self.w8(HOST_CONTROL, self.r8(HOST_CONTROL) & !HC_4BIT);
+                    let _ = self.command(55, self.rca << 16, R1);
+                    let _ = self.command(6, 0, R1);
+                }
+                1
+            }
+        }
     }
 }
