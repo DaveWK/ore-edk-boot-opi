@@ -14,6 +14,8 @@ const ARCH: &str = "riscv64";
 // TODO: instead of hardcoding, create one binary per feature set.
 // const IMAGE_BIN: &str = "oreboot-spacemit-k1x.bin";
 const BT0_STAGE: &str = "bt0";
+// Where bt0 expects an appended next stage (PAYLOAD_OFFSET in bt0).
+const NEXT_STAGE_OFFSET: usize = 0x1_0000;
 // const MAIN_STAGE: &str = "main";
 struct Stages {
     bt0: Stage,
@@ -62,7 +64,20 @@ fn build_bt0(env: &Env, dir: &PathBuf, stage: &Stage, features: &[String]) {
     objcopy(env, stage, binutils_prefix, ARCH);
 
     let bin_file = target_bin(env, stage);
-    let bt0 = std::fs::read(&bin_file).expect("opening bt0 binary file");
+    let mut bt0 = std::fs::read(&bin_file).expect("opening bt0 binary file");
+    // With --payload, the next stage (e.g. U-Boot SPL linked to run from
+    // DRAM) goes 64K behind bt0 in the same image; bt0 copies it to DRAM
+    // and jumps to it once DRAM is up.
+    if let Some(payload) = &env.payload {
+        let next = std::fs::read(payload).expect("opening payload file");
+        if bt0.len() > NEXT_STAGE_OFFSET {
+            error!("bt0 is {} bytes, more than {NEXT_STAGE_OFFSET}", bt0.len());
+            process::exit(1);
+        }
+        bt0.resize(NEXT_STAGE_OFFSET, 0);
+        bt0.extend_from_slice(&next);
+        info!("{BT0_STAGE}: appended {} bytes from {payload}", next.len());
+    }
     let image = k1x_hdr::build(&bt0);
     let mut output_file = File::options()
         .write(true)
