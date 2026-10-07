@@ -1,0 +1,27 @@
+From 2cb26b826b04eec775ab02f8cedcee8d10b0686b Mon Sep 17 00:00:00 2001
+From: zhouxiaolei <zhouxl@spacemit.com>
+Date: Tue, 8 Jul 2025 15:07:35 +0800
+Subject: [PATCH 3/4] RiscVFeature: update RISC-V CPU Feature pcd for K1
+
+K1 only support CMO, Sstc, Pbmt extentions.
+
+Change-Id: I5930f44880384dd202ce91444137a5455b1666b9
+---
+ Platform/Spacemit/K1/MUSE-Pi-Pro/MUSE-Pi-Pro.dsc | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/Platform/Spacemit/K1/MUSE-Pi-Pro/MUSE-Pi-Pro.dsc b/Platform/Spacemit/K1/MUSE-Pi-Pro/MUSE-Pi-Pro.dsc
+index fc416ce081..dccedc18a8 100644
+--- a/Platform/Spacemit/K1/MUSE-Pi-Pro/MUSE-Pi-Pro.dsc
++++ b/Platform/Spacemit/K1/MUSE-Pi-Pro/MUSE-Pi-Pro.dsc
+@@ -81,7 +81,9 @@
+   # previous stage has feature enabled and user wants to disable it.
+   # BIT 1 = Supervisor Time Compare (Sstc). This bit is relevant only if
+   # previous stage has feature enabled and user wants to disable it.
+-  gEfiMdePkgTokenSpaceGuid.PcdRiscVFeatureOverride|0xFFFFFFFFFFFFFFFF
++  # BIT 2 = Page-Based Memory Types (Pbmt). This bit is relevant only if
++  # previous stage has feature enabled and user wants to disable it.
++  gEfiMdePkgTokenSpaceGuid.PcdRiscVFeatureOverride|0x07
+ 
+   # Frequency of the core crystal clock in Hz
+   gUefiCpuPkgTokenSpaceGuid.PcdCpuCoreCrystalClockFrequency|24000000

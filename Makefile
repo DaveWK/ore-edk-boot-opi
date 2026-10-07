@@ -6,33 +6,28 @@
 #                  a warning: that erases NOR 0x2a0000-0x360000 on first boot)
 #   make rv2-nor   OrangePi RV2: everything in the SPI NOR
 #   make clean     remove build/ and out/
-#   make mrproper  also remove oreboot's target/ and the submodule checkouts
+#   make sources   fetch the pinned source trees (patches/*/pin.env)
+#   make mrproper  also remove oreboot's target/ and the fetched source trees
 #   make help      list the targets
 BOARDS := r2s rv2 rv2-nor
 TARGET ?= DEBUG
 
-.PHONY: all help $(BOARDS) submodules clean mrproper
+.PHONY: all help $(BOARDS) sources clean mrproper
 all: $(BOARDS)
 
 help:
 	@echo "r2s         OrangePi R2S: bt0 in eMMC boot0, OpenSBI + EDK2 in eMMC boot1"
 	@echo "rv2         OrangePi RV2: bt0 and OpenSBI + EDK2 on the microSD card"
 	@echo "rv2-nor     OrangePi RV2: everything in the SPI NOR"
-	@echo "submodules  check out the pinned submodules"
+	@echo "sources     fetch + patch edk2, edk2-platforms, opensbi and dts (patches/*/pin.env)"
 	@echo "clean       remove build/ and out/"
-	@echo "mrproper    also remove oreboot's target/ and the submodule checkouts"
+	@echo "mrproper    also remove oreboot's target/ and the fetched source trees"
 	@echo "TARGET=$(TARGET) (DEBUG or RELEASE)"
 
-submodules:
-	git submodule update --init dts edk2-platforms opensbi
-	git submodule update --init edk2
-	git -C edk2 submodule update --init --depth 1 \
-	  BaseTools/Source/C/BrotliCompress/brotli MdeModulePkg/Library/BrotliCustomDecompressLib/brotli \
-	  MdePkg/Library/BaseFdtLib/libfdt CryptoPkg/Library/OpensslLib/openssl \
-	  CryptoPkg/Library/MbedTlsLib/mbedtls MdeModulePkg/Universal/RegularExpressionDxe/oniguruma \
-	  MdePkg/Library/MipiSysTLib/mipisyst RedfishPkg/Library/JsonLib/jansson \
-	  SecurityPkg/DeviceSecurity/SpdmLib/libspdm
-	git -C edk2-platforms submodule update --init --depth 1
+# edk2, edk2-platforms, opensbi and dts are fetched at the commits pinned in
+# patches/*/pin.env, with patches/<group>/[<project>/]*.patch applied.
+sources:
+	python3 scripts/fetch-sources.py
 
 $(BOARDS):
 	scripts/build.sh $@ $(TARGET)
@@ -41,5 +36,4 @@ clean:
 	rm -rf build out
 
 mrproper: clean
-	rm -rf oreboot/target
-	git submodule deinit --all --force
+	rm -rf oreboot/target edk2 edk2-platforms opensbi dts

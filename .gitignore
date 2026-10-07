@@ -1,2 +1,7 @@
 /build/
 /out/
+# Fetched (and patched) by scripts/fetch-sources.py (make sources)
+/edk2/
+/edk2-platforms/
+/opensbi/
+/dts/

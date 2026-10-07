@@ -1,0 +1,43 @@
+From 16cc1a64ab3de3fcdaa51ddbef6705c3bfe3ca0e Mon Sep 17 00:00:00 2001
+From: zhouxl <zhouxl@spacemit.com>
+Date: Mon, 30 Jun 2025 17:48:58 +0800
+Subject: [PATCH 2/4] pcie: unbind pcie host init status with pcie link state
+
+The initial status of pcie host bridge should NOT associated
+with whether pcie device is attatched or not.
+
+Pcie host resource must be registered even if there is NO pcie
+devices attatched; during pcie scan stage, it need these resource
+to locate pcie config space.
+
+Change-Id: I583106cfbb7f85a51e31956ff86bd5dbfea0ede4
+Signed-off-by: zhouxl <zhouxl@spacemit.com>
+---
+ .../PcieHostBridgeControllerDxe.c                    | 12 +++++-------
+ 1 file changed, 5 insertions(+), 7 deletions(-)
+
+diff --git a/Silicon/Spacemit/K1/Drivers/PcieHostBridgeControllerDxe/PcieHostBridgeControllerDxe.c b/Silicon/Spacemit/K1/Drivers/PcieHostBridgeControllerDxe/PcieHostBridgeControllerDxe.c
+index b8ac07beaa..5874ed2705 100644
+--- a/Silicon/Spacemit/K1/Drivers/PcieHostBridgeControllerDxe/PcieHostBridgeControllerDxe.c
++++ b/Silicon/Spacemit/K1/Drivers/PcieHostBridgeControllerDxe/PcieHostBridgeControllerDxe.c
+@@ -938,15 +938,13 @@ K1PciHostBridgeInit (
+ 
+   if (!PcieLinkUp (Port, LINK_SPEED_GEN_2)) {
+     DEBUG ((DEBUG_ERROR, "%a: PCIE-%d: Link down\n", __FUNCTION__, Port));
+-    return EFI_DEVICE_ERROR;
++  } else {
++    DEBUG (
++           (DEBUG_INFO, "%a: PCIE-%d: Link up (Gen%d-x%d)\n", __FUNCTION__, Port,
++            GetLinkSpeed (Port), GetLinkWidth (Port))
++           );
+   }
+ 
+-  DEBUG (
+-         (DEBUG_INFO, "%a: PCIE-%d: Link up (Gen%d-x%d)\n", __FUNCTION__, Port,
+-          GetLinkSpeed (Port),
+-          GetLinkWidth (Port))
+-         );
+-
+   return EFI_SUCCESS;
+ }
+ 

@@ -1,0 +1,115 @@
+From 1bad7a5403e6dfc1ec7a966bf7faf6daa1b5b57e Mon Sep 17 00:00:00 2001
+From: zhouxl <zhouxl@spacemit.com>
+Date: Fri, 19 Sep 2025 15:42:27 +0800
+Subject: [PATCH 4/4] GOP: set memory attribute of framebuffer to WC
+
+Config framebuffer memory attribute to Write Combined, so we do NOT
+need flush cache manually.
+
+Change-Id: I7a6a66f4e3123df6f61f4b2d6d5f442c0fddcc71
+---
+ .../K1/Drivers/HdmiGraphicsOutputDxe/Dpu.c    | 57 +++++++++++++++++--
+ .../HdmiGraphicsOutputDxe.c                   |  2 +-
+ 2 files changed, 53 insertions(+), 6 deletions(-)
+
+diff --git a/Silicon/Spacemit/K1/Drivers/HdmiGraphicsOutputDxe/Dpu.c b/Silicon/Spacemit/K1/Drivers/HdmiGraphicsOutputDxe/Dpu.c
+index e781c80242..d909786dde 100644
+--- a/Silicon/Spacemit/K1/Drivers/HdmiGraphicsOutputDxe/Dpu.c
++++ b/Silicon/Spacemit/K1/Drivers/HdmiGraphicsOutputDxe/Dpu.c
+@@ -15,6 +15,7 @@
+ #include <Library/IoLib.h>
+ #include <Library/MemoryAllocationLib.h>
+ #include <Library/PcdLib.h>
++#include <Library/DxeServicesTableLib.h>
+ 
+ #include <Library/MemoryManagementLib.h>
+ 
+@@ -136,14 +137,57 @@ DpuHdmiMmioRemap (
+   MapRegToGcdMmioSpace (K1_APMU_BASE, SIZE_4KB);
+ }
+ 
++STATIC
++EFI_STATUS
++AllocateFrameBuffer (
++  VOID   **FbBase,
++  UINTN  *FbSize
++  )
++{
++  EFI_STATUS  Status;
++  VOID        *Buffer;
++  UINTN       Pages, BuffSize;
++
++  Pages  = EFI_SIZE_TO_PAGES (*FbSize);
++  Buffer = AllocatePages (Pages);
++  if (NULL == Buffer) {
++    DEBUG (
++           (DEBUG_ERROR,
++            "%a: failed to allocate %d pages memory for framebuffer\n",
++            __func__, Pages)
++           );
++    return EFI_OUT_OF_RESOURCES;
++  }
++
++  BuffSize = EFI_PAGES_TO_SIZE (Pages);
++  Status   = gDS->SetMemorySpaceAttributes ((UINTN)Buffer, BuffSize, EFI_MEMORY_WC);
++  if (EFI_ERROR (Status)) {
++    DEBUG (
++           (DEBUG_ERROR,
++            "%a: failed to set memory space attributes for region [0x%p+0x%Lx)\n",
++            __func__, Buffer, BuffSize)
++           );
++
++    FreePages (Buffer, Pages);
++    return EFI_DEVICE_ERROR;
++  }
++
++  *FbBase = Buffer;
++  *FbSize = BuffSize;
++  SetMem (Buffer, BuffSize, 0);
++
++  return EFI_SUCCESS;
++}
++
+ EFI_STATUS
+ HwInitializeDisplay (
+   VOID   **FbBase,
+   UINTN  *FbSize
+   )
+ {
+-  INT32   DpuId, RemoteDpuId;
+-  UINT32  Xsize, Ysize, Bpix;
++  INT32       DpuId, RemoteDpuId;
++  UINT32      Xsize, Ysize, Bpix;
++  EFI_STATUS  Status;
+ 
+   DpuHdmiMmioRemap ();
+ 
+@@ -160,9 +204,12 @@ HwInitializeDisplay (
+   Ysize = 1080;
+ 
+   *FbSize = Xsize * Ysize * VIDEO_BPP32_BYTES_PER_PIXEL;
+-  *FbBase = AllocatePages (EFI_SIZE_TO_PAGES (*FbSize));
+-  SetMem (*FbBase, *FbSize, 0);
+-  VideoSyncAll ((UINTN)*FbBase, *FbSize);
++  Status  = AllocateFrameBuffer (FbBase, FbSize);
++  if (EFI_ERROR (Status)) {
++    return Status;
++  }
++
++  //   VideoSyncAll ((UINTN)*FbBase, *FbSize);
+ 
+   DEBUG (
+          (DEBUG_INFO, "display: %dx%d, fb = 0x%x, size = 0x%x\n",
+diff --git a/Silicon/Spacemit/K1/Drivers/HdmiGraphicsOutputDxe/HdmiGraphicsOutputDxe.c b/Silicon/Spacemit/K1/Drivers/HdmiGraphicsOutputDxe/HdmiGraphicsOutputDxe.c
+index 036f36e31b..a8849078cf 100644
+--- a/Silicon/Spacemit/K1/Drivers/HdmiGraphicsOutputDxe/HdmiGraphicsOutputDxe.c
++++ b/Silicon/Spacemit/K1/Drivers/HdmiGraphicsOutputDxe/HdmiGraphicsOutputDxe.c
+@@ -316,7 +316,7 @@ GopBlt (
+       break;
+   }
+ 
+-  VideoSyncAll (This->Mode->FrameBufferBase, This->Mode->FrameBufferSize);
++  //   VideoSyncAll (This->Mode->FrameBufferBase, This->Mode->FrameBufferSize);
+ 
+   return EFI_SUCCESS;
+ }

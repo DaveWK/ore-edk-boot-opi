@@ -28,10 +28,10 @@ Known gaps:
 |---|---|
 | `oreboot/` | oreboot (from [orangecms/oreboot](https://github.com/orangecms/oreboot) `k1x`, history kept) with the OrangePi K1 bt0 work in `src/mainboard/spacemit/k1x/bt0`: per-board rank count, eMMC driver, FIT loader, OpenSBI `fw_dynamic` handoff, EEPROM I2C setup; and `xtask` image packing (`--payload`) |
 | `edk2-opi/OrangePiPkg` | EDK2 platforms `K1/R2S` and `K1/RV2` (derived from SpacemiT's MUSE-Pi-Pro platform), and `BareSatpOnExitDxe` (MMU off at ExitBootServices) |
-| `edk2` | submodule: [bianbu-maker/edk2](https://github.com/bianbu-maker/edk2) `k1` (SpacemiT's EDK2 base) |
-| `edk2-platforms` | submodule: [bianbu-maker/edk2-platforms](https://github.com/bianbu-maker/edk2-platforms) `k1` (SpacemiT K1 silicon package) |
-| `opensbi` | submodule: OpenSBI v1.9 |
-| `dts` | submodule: devicetree-rebasing `v7.2-dts` (board DTs) |
+| `patches/edk2/` | EDK2 inputs: `pin.env` pins the [TianoCore edk2](https://github.com/tianocore/edk2) and [edk2-platforms](https://github.com/tianocore/edk2-platforms) base commits and the resulting trees; `edk2-platforms/*.patch` is SpacemiT's K1 silicon package (four commits from [bianbu-maker/edk2-platforms](https://github.com/bianbu-maker/edk2-platforms) `k1`, authors kept). edk2 needs no patches |
+| `patches/opensbi/pin.env` | OpenSBI v1.9 |
+| `patches/dts/pin.env` | devicetree-rebasing `v7.2-dts` (board DTs) |
+| `edk2`, `edk2-platforms`, `opensbi`, `dts` | fetched by `scripts/fetch-sources.py` (`make sources`) at the pinned base, with any patches applied and the tree checked against the pin; not tracked here (no git submodules) |
 | `boards/{r2s,rv2,rv2-nor}/board.conf` | per-image settings; `boards/fit.its.in` FIT template |
 | `scripts/build.sh`, `Makefile` | build |
 
@@ -46,9 +46,9 @@ Requirements:
 - `llvm-objcopy` or `rust-objcopy` for oreboot's packer.
 - `fastboot` (Android platform tools) on the workstation, to flash a board through bt0.
 
-    git clone --recurse-submodules=dts --recurse-submodules=opensbi https://github.com/DaveWK/ore-edk-boot-opi.git
+    git clone https://github.com/DaveWK/ore-edk-boot-opi.git
     cd ore-edk-boot-opi
-    make submodules
+    make sources
     make r2s          # or: make rv2, make rv2-nor; TARGET=RELEASE for a release EDK2
 
 The current K1 DSCs use the device tree and do not enable ACPI; `iasl` is not

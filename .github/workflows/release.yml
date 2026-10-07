@@ -52,8 +52,8 @@ jobs:
           done
           command -v llvm-objcopy >/dev/null || command -v rust-objcopy >/dev/null ||
             { echo "missing tool on the runner: llvm-objcopy or rust-objcopy" >&2; exit 1; }
-      - name: Fetch pinned submodules
-        run: make submodules
+      - name: Fetch the pinned sources
+        run: make sources
       - name: Build ${{ matrix.image }}
         run: make "$IMAGE"
       - name: Name the release assets
