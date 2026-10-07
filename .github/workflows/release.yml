@@ -93,6 +93,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          command -v gh >/dev/null || { echo "missing tool on the runner: gh" >&2; exit 1; }
           cd dist
           for sums in *-SHA256SUMS; do sha256sum -c "$sums"; done
           cat *-SHA256SUMS > SHA256SUMS
@@ -104,7 +105,7 @@ jobs:
             printf 'See README.md for install steps. Checksums in SHA256SUMS.\n'
           } > ../notes.txt
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" -- * --clobber
+            gh release upload "$TAG" --clobber -- *
           else
-            gh release create "$TAG" -- * --verify-tag --title "$TAG" --notes-file ../notes.txt
+            gh release create "$TAG" --verify-tag --title "$TAG" --notes-file ../notes.txt -- *
           fi
