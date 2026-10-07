@@ -38,15 +38,22 @@ Known gaps:
 ## Build
 
 Requirements:
-- a `riscv64-linux-gnu-` cross GCC;
-- host GCC, Python 3, `dtc`/`fdtput`, `mkimage` (uboot-tools) and `cpp`;
+- Git, GNU make, Bash and GNU host utilities;
+- a `riscv64-linux-gnu-` cross GCC and matching binutils;
+- host GCC and G++ (EDK2's VfrCompile is C++), libuuid headers (Fedora `libuuid-devel`), Python 3, `dtc`/`fdtput`, `mkimage` (uboot-tools) and `cpp`;
+- on a riscv64 host, native GCC and binutils work too: provide `riscv64-linux-gnu-*` aliases or set `CROSS_COMPILE` to a nonempty native-tool prefix (`CROSS_COMPILE=""` currently selects the default cross prefix);
 - Rust via rustup. `oreboot/rust-toolchain.toml` pins the nightly.
 - `llvm-objcopy` or `rust-objcopy` for oreboot's packer.
+- `fastboot` (Android platform tools) on the workstation, to flash a board through bt0.
 
     git clone --recurse-submodules=dts --recurse-submodules=opensbi https://github.com/DaveWK/ore-edk-boot-opi.git
     cd ore-edk-boot-opi
     make submodules
     make r2s          # or: make rv2, make rv2-nor; TARGET=RELEASE for a release EDK2
+
+The current K1 DSCs use the device tree and do not enable ACPI; `iasl` is not
+required for these targets. Host dependencies are separate from the RISC-V
+cross tools: EDK2 BaseTools are compiled and executed on the build host.
 
 `out/<image>/` then holds:
 - `bt0.bin`: the BootROM image (oreboot bt0, signed by oreboot's packer).
