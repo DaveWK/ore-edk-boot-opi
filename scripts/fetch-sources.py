@@ -77,7 +77,15 @@ def current_tree(dest):
     )
     if result.returncode:
         return None
-    dirty = git(dest, "status", "--porcelain", "--untracked-files=no")
+    # Changes inside the project's own submodules do not count (its build may
+    # patch them, as edk2-rk3588 does); a submodule at another commit does.
+    dirty = git(
+        dest,
+        "status",
+        "--porcelain",
+        "--untracked-files=no",
+        "--ignore-submodules=dirty",
+    )
     return None if dirty else result.stdout.strip()
 
 
