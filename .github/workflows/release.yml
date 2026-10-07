@@ -1,7 +1,8 @@
 name: Release images
 
-# Build the three boot-chain images (make r2s, make rv2, make rv2-nor) for a
-# release tag and attach them to that tag's GitHub release. Builds run on a
+# Build the r2s and rv2 boot-chain images for a release tag and attach them
+# to that tag's GitHub release. rv2-nor is left out on purpose: it rewrites
+# the RV2's SPI NOR, so it is build-it-yourself only. Builds run on a
 # private self-hosted Fedora 44 runner; no Ubuntu-hosted runners are used.
 
 on:
@@ -28,7 +29,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [r2s, rv2, rv2-nor]
+        image: [r2s, rv2]
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
       IMAGE: ${{ matrix.image }}
@@ -98,8 +99,8 @@ jobs:
           {
             printf 'Boot-chain images for %s: oreboot bt0 -> OpenSBI -> EDK2 (no U-Boot).\n\n' "$TAG"
             printf -- '- r2s: bt0.bin to eMMC boot0 at 512; next.img to eMMC boot1\n'
-            printf -- '- rv2: bt0.bin to the microSD FSBL copies; next.img to the GPT partition "boot1"\n'
-            printf -- '- rv2-nor: bt0.bin to NOR 0x20000 and 0x70000; next.itb to NOR 0xa0000\n\n'
+            printf -- '- rv2: bt0.bin to the microSD FSBL copies; next.img to the GPT partition "boot1"\n\n'
+            printf 'No rv2-nor (SPI NOR) image is released; build it with make rv2-nor.\n'
             printf 'See README.md for install steps. Checksums in SHA256SUMS.\n'
           } > ../notes.txt
           if gh release view "$TAG" >/dev/null 2>&1; then

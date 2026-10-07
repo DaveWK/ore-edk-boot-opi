@@ -56,7 +56,7 @@ Requirements:
 
 ## Releases
 
-Pushing a tag `v*` builds `make r2s`, `make rv2` and `make rv2-nor` and attaches `<image>-bt0.bin`, `<image>-next.itb`, `<image>-next.img` and `SHA256SUMS` to that tag's GitHub release (`.github/workflows/release.yml`). The workflow runs only on a private self-hosted runner with the labels `self-hosted, linux, x64, fedora44`, which needs the build requirements above installed.
+Pushing a tag `v*` builds `make r2s` and `make rv2` and attaches `<image>-bt0.bin`, `<image>-next.itb`, `<image>-next.img` and `SHA256SUMS` to that tag's GitHub release (`.github/workflows/release.yml`). No `rv2-nor` image is released: it rewrites the RV2's SPI NOR, so build it yourself with `make rv2-nor` if you want it. The workflow runs only on a private self-hosted runner with the labels `self-hosted, linux, x64, fedora44`, which needs the build requirements above installed.
 
 ## Installing on the R2S
 
