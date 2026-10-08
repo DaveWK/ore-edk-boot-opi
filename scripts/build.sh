@@ -11,6 +11,10 @@
 #              (R2S: eMMC boot1; RV2: microSD sectors from LBA 8192)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# Reproducible images: mkimage (FIT timestamps) and EDK2's tools (PE/FV time
+# fields) take their time from SOURCE_DATE_EPOCH; default it to the commit's.
+SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git -C "$ROOT" log -1 --format=%ct 2>/dev/null || echo 0)}
+export SOURCE_DATE_EPOCH
 BOARD=${1:?board}
 TARGET=${2:-DEBUG}
 CONF=$ROOT/boards/$BOARD/board.conf
