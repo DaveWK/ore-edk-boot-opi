@@ -1,0 +1,28 @@
+---
+# Build every board image on pull requests and main pushes, on the Fedora 44
+# Forgejo runner (label fedora44), so boards need not be built locally.
+name: build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  images:
+    runs-on: fedora44
+    timeout-minutes: 120
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+      - name: Fetch the pinned sources
+        run: make sources
+      - name: Build r2s, rv2 and rv2-nor
+        run: make r2s rv2 rv2-nor
+      - name: Image checksums
+        run: |
+          for b in r2s rv2 rv2-nor; do
+            echo "== $b"
+            cat "out/$b/SHA256SUMS"
+          done
