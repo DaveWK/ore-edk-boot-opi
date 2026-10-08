@@ -12,6 +12,9 @@ with prefix <P> (say EDK2_PLATFORMS) it holds:
   <P>_DIR         optional checkout directory (default: <p> with _ -> -)
   <P>_SUBMODULES  optional: the upstream project's own submodules to check out,
                   "all", "recursive" (all, nested too) or a list of paths
+  <P>_PATHS       optional: check out only these directories (sparse, blobs
+                  fetched on demand), for large read-only reference trees; the
+                  commit and tree are still checked in full. No patches.
 
 Patches are `git format-patch` files of real commits on the base, in
 patches/<group>/<project>/ (or patches/<group>/ when the group is the project).
@@ -107,6 +110,7 @@ def fetch(group, prefix, pin, root):
     if name != group:
         patch_dir = patch_dir / name
     dest = root / name
+    paths = pin.get(f"{prefix}_PATHS", "").split()
     if current_tree(dest) == tree:
         print(f"{name}: already at tree {tree[:12]}")
     else:
@@ -114,6 +118,8 @@ def fetch(group, prefix, pin, root):
             die(f"{dest} exists but is not the pinned tree; move it aside first")
         dest.mkdir(parents=True, exist_ok=True)
         git(dest, "init", "-q")
+        if paths:
+            git(dest, "sparse-checkout", "set", *paths)
         reference = os.environ.get("SOURCES_REFERENCE")
         objects = Path(reference, name, ".git", "objects") if reference else None
         if objects and objects.is_dir():
@@ -124,12 +130,17 @@ def fetch(group, prefix, pin, root):
         )
         if present.returncode:
             want = pin.get(f"{prefix}_REF", base)
-            git(dest, "fetch", "-q", "--depth", "1", url, want, capture=False)
+            blobless = ["--filter=blob:none"] if paths else []
+            git(
+                dest, "fetch", "-q", "--depth", "1", *blobless, url, want, capture=False
+            )
             got = git(dest, "rev-parse", "FETCH_HEAD^{commit}")
             if got != base:
                 die(f"{name}: {want} is {got}, pin wants {base}")
         git(dest, "checkout", "-q", "--detach", base)
         patches = sorted(patch_dir.glob("*.patch")) if patch_dir.is_dir() else []
+        if patches and paths:
+            die(f"{name}: a sparse checkout ({prefix}_PATHS) cannot take patches")
         if patches:
             git(
                 dest,
